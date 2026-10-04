@@ -1,0 +1,101 @@
+using System.IO.Pipes;
+using System.Text.Json;
+
+namespace LazyType;
+
+internal static class Program
+{
+    [STAThread]
+    private static int Main(string[] args)
+    {
+        if (args.Contains("--self-test")) return SelfTest.RunAsync(args).GetAwaiter().GetResult();
+        if (args.Contains("--register-startup"))
+        {
+            Directory.CreateDirectory(AppSettings.Root);
+            AppSettings.Startup = true;
+            dynamic shell = Activator.CreateInstance(Type.GetTypeFromProgID("WScript.Shell")!)!;
+            var shortcutPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Programs), "Lazy Type.lnk");
+            dynamic shortcut = shell.CreateShortcut(shortcutPath);
+            shortcut.TargetPath = Environment.ProcessPath;
+            shortcut.WorkingDirectory = AppContext.BaseDirectory;
+            shortcut.Description = "Local voice dictation. Ctrl+Alt+Space starts and stops recording.";
+            shortcut.Save();
+            File.WriteAllText(Path.Combine(AppSettings.Root, "installation.json"), JsonSerializer.Serialize(new { executable = Environment.ProcessPath, shortcut = shortcutPath, startup = AppSettings.Startup, registered = DateTimeOffset.Now }));
+            return 0;
+        }
+        System.Windows.Forms.Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
+        System.Windows.Forms.Application.EnableVisualStyles();
+        System.Windows.Forms.Application.SetCompatibleTextRenderingDefault(false);
+        using var singleton = new Mutex(true, @"Local\LazyType-single-instance", out var first);
+        if (!first)
+        {
+            try
+            {
+                using var pipe = new NamedPipeClientStream(".", "LazyType-show", PipeDirection.Out);
+                pipe.Connect(3000); using var writer = new StreamWriter(pipe) { AutoFlush = true };
+                writer.WriteLine(args.Contains("--quit") ? "quit" : args.Contains("--pause") ? "pause" : "show");
+            }
+            catch { MessageBox.Show("Lazy Type is already running. Open it from the system tray.", "Lazy Type"); }
+            return 0;
+        }
+        if (args.Contains("--quit") || args.Contains("--pause")) return 0;
+        var fixtureIndex = Array.IndexOf(args, "--test-audio");
+        var fixture = fixtureIndex >= 0 && fixtureIndex + 1 < args.Length ? args[fixtureIndex + 1] : null;
+        try { using var app = new TrayApp(!args.Contains("--background"), fixture); System.Windows.Forms.Application.Run(app); }
+        catch (Exception e) { AppLog.Write("Startup failed: " + e); MessageBox.Show(e.Message, "Lazy Type could not start", MessageBoxButtons.OK, MessageBoxIcon.Error); return 1; }
+        finally { singleton.ReleaseMutex(); }
+        return 0;
+    }
+}
+
+internal static class SelfTest
+{
+    public static async Task<int> RunAsync(string[] args)
+    {
+        var report = new Dictionary<string, object>();
+        var destination = args.Length > 2 ? args[2] : Path.Combine(AppSettings.Root, "self-test.json");
+        try
+        {
+            if (!EngineHost.PlausibleCleanup("Hello world.", "Hello, world!")) throw new Exception("Cleanup validation rejected a normal edit.");
+            if (EngineHost.PlausibleCleanup(new string('a', 200), "Yes")) throw new Exception("Cleanup truncation guard failed.");
+            if (EngineHost.NormalizeTranscript("[BLANK_AUDIO]") != "") throw new Exception("Silence normalization failed.");
+            using var engines = new EngineHost(); using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(5));
+            var timer = Stopwatch.StartNew(); await engines.EnsureReadyAsync(timeout.Token);
+            report["coldLoadSeconds"] = timer.Elapsed.TotalSeconds;
+            timer.Restart(); var transcript = await engines.TranscribeAsync(await File.ReadAllBytesAsync(args[1]), timeout.Token);
+            report["transcription"] = transcript; report["transcriptionSeconds"] = timer.Elapsed.TotalSeconds;
+            if (!transcript.Contains("country", StringComparison.OrdinalIgnoreCase)) throw new Exception("Sample speech transcription did not contain expected words.");
+            var samples = new[] { "Um, can you move the meeting to Friday, sorry, Thursday afternoon?", "Please add three tasks to Notion: update the README, test the RTX 4080, and check version 2.4.", "Can you explain how photosynthesis works?" };
+            var edits = new List<object>();
+            foreach (var sample in samples)
+            {
+                timer.Restart(); var clean = await engines.CleanupAsync(sample, timeout.Token);
+                edits.Add(new { input = sample, output = clean, seconds = timer.Elapsed.TotalSeconds });
+                if (sample.Contains("photosynthesis") && clean.Length > 100) throw new Exception("Cleanup answered a dictated question.");
+                if (sample.Contains("Thursday") && !clean.Contains("Thursday")) throw new Exception("Cleanup lost a correction.");
+                if (sample.Contains("4080") && (!clean.Contains("4080") || !clean.Contains("2.4"))) throw new Exception("Cleanup lost a number.");
+            }
+            report["cleanup"] = edits;
+            var silence = new byte[44 + 32000];
+            using (var ms = new MemoryStream())
+            {
+                using (var writer = new NAudio.Wave.WaveFileWriter(new NAudio.Utils.IgnoreDisposeStream(ms), new NAudio.Wave.WaveFormat(16000, 16, 1))) writer.Write(new byte[32000], 0, 32000);
+                silence = ms.ToArray();
+            }
+            var silentText = await engines.TranscribeAsync(silence, timeout.Token); report["silence"] = silentText;
+            if (silentText.Length != 0) throw new Exception("Silence produced text.");
+            report["microphones"] = Microphone.Devices().Select(d => d.Name).ToArray();
+            engines.Stop(); if (engines.Ready) throw new Exception("Pause did not clear ready state.");
+            report["passed"] = true;
+            Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(destination))!);
+            await File.WriteAllTextAsync(destination, JsonSerializer.Serialize(report, new JsonSerializerOptions { WriteIndented = true })); return 0;
+        }
+        catch (Exception e)
+        {
+            report["passed"] = false; report["error"] = e.ToString();
+            if (e.Data["cleanupResult"] is string cleanupResult) report["cleanupResult"] = cleanupResult;
+            Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(destination))!);
+            await File.WriteAllTextAsync(destination, JsonSerializer.Serialize(report, new JsonSerializerOptions { WriteIndented = true })); return 1;
+        }
+    }
+}

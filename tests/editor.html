@@ -1,0 +1,10 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Lazy Type · Local insertion test</title>
+<style>body{font:18px system-ui;margin:40px auto;max-width:840px;background:#f5f7fa;color:#27364b}textarea,[contenteditable],input{display:block;width:100%;box-sizing:border-box;min-height:80px;background:white;padding:18px;border:1px solid #aeb8c7;border-radius:8px;margin:12px 0 28px;font:18px system-ui}input{min-height:50px}small{color:#53687f}</style></head>
+<body><h1>Lazy Type insertion test</h1><p>Local sample data only. No network requests or saved content.</p>
+<label for="plain">Plain text box</label><textarea id="plain" aria-label="Plain text box"></textarea>
+<label for="rich">Rich text / Notion-style block</label><div id="rich" contenteditable="true" role="textbox" aria-label="Rich text block"></div>
+<label for="other">Different field (focus-change test)</label><input id="other" aria-label="Different field">
+<label for="secret">Password field (insertion should be blocked)</label><input id="secret" type="password" aria-label="Password field">
+<small id="events">No insertion events yet</small><script>let n=0;document.addEventListener('input',e=>{document.querySelector('#events').textContent=`${++n} input events. Last field: ${e.target.id}. Characters: ${(e.target.value??e.target.innerText).length}`})</script>
+</body></html>

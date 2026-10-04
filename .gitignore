@@ -10,3 +10,10 @@ Desktop.ini
 
 # Logs
 *.log
+
+# Build output, local models and verification artifacts
+**/bin/
+**/obj/
+.runtime/
+artifacts/
+*.user

@@ -7,7 +7,7 @@ A Windows tray application for fully local voice dictation, using GPU-accelerate
 1. Open **Lazy Type** from the Start menu. It also starts hidden when you sign in to Windows. Startup runs only the lightweight app and hotkeys; no speech or cleanup models are loaded.
 2. Click the text field where you want to dictate.
 3. Press **Ctrl+Alt+Space** once, speak, then press it again to stop. The models load in the background while you speak.
-4. A floating indicator shows recording and microphone level, followed by transcription and cleanup. It does not take focus. The microphone closes before model processing starts.
+4. A compact, rounded, translucent indicator follows your mouse pointer and shows recording and microphone level, followed by transcription and cleanup. It stays within the screen's working area and does not take focus. The microphone closes before model processing starts.
 5. After transcription and cleanup, the models unload automatically and your text is pasted into the original field if it is still focused. Otherwise, open Lazy Type and copy the result. Model files remain on disk for the next recording.
 
 **Ctrl+Alt+Shift+Space** toggles recording without grammar cleanup. **Escape** cancels an active recording or processing operation and unloads the models. **Ctrl+Alt+Shift+P** pauses/resumes dictation. Pause and Quit release any model workers and their GPU allocations. Resume only arms dictation; models load on the next recording. The dictation hotkey also resumes automatically when paused.

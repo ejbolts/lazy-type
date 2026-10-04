@@ -8,6 +8,8 @@ public sealed class AppSettings
     public int Microphone { get; set; } = -1;
     public bool Cleanup { get; set; } = true;
     public string Hotkey { get; set; } = "Ctrl+Alt+Space";
+    public string Theme { get; set; } = "System";
+    public string PopupTheme { get; set; } = "Follow app";
     public static string Root => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Applications", "LazyType");
     public static string SettingsFile => Path.Combine(Root, "settings.json");
     public static AppSettings Load()

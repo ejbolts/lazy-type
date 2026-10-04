@@ -18,6 +18,8 @@ On the installed RTX 4080 PC, the warm app and model workers used approximately 
 
 For the alternate Ctrl+Shift+Space hotkey, add Alt for raw dictation. For F8, use Shift+F8 for raw dictation. Shortcut conflicts are reported so another combination can be selected.
 
+**App theme** defaults to **System** and follows the Windows app color setting, including changes while Lazy Type is running. Choose **Light** or **Dark** to override it. **Popup theme** independently controls the floating dictation indicator: **Follow app** (default), **Light**, or **Dark**. Both choices are saved. Use **Preview** to see the popup for five seconds without opening the microphone or loading models.
+
 ## Models and privacy
 
 - Whisper Large V3 Turbo Q5_0, approximately 574 MB model file.

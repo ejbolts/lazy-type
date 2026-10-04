@@ -9,6 +9,7 @@ internal sealed class TrayApp : ApplicationContext
     private readonly RecordingOverlay overlay = new();
     private readonly EngineHost engines = new();
     private readonly AppSettings settings = AppSettings.Load();
+    private readonly ThemeController themes;
     private readonly NotifyIcon tray = new();
     private readonly CancellationTokenSource shutdown = new();
     private CancellationTokenSource lifetime = new();
@@ -30,6 +31,7 @@ internal sealed class TrayApp : ApplicationContext
             form.Text = "Lazy Type · Test audio";
         }
         _ = form.Handle;
+        themes = new ThemeController(form, overlay, settings, settings.Save);
         devices = Microphone.Devices();
         foreach (var item in devices) form.Mic.Items.Add(item.Name);
         form.Mic.SelectedIndex = Math.Max(0, devices.FindIndex(d => d.Id == settings.Microphone));
@@ -262,7 +264,7 @@ internal sealed class TrayApp : ApplicationContext
     {
         if (closing) return;
         closing = true; shutdown.Cancel(); operation?.Cancel(); lifetime.Cancel();
-        mic?.Dispose(); overlay.Dispose(); engines.Dispose();
+        mic?.Dispose(); themes.Dispose(); overlay.Dispose(); engines.Dispose();
         for (var id = 1; id <= 4; id++) Native.UnregisterHotKey(form.Handle, id);
         tray.Visible = false; tray.Icon?.Dispose(); tray.Dispose(); form.Quitting = true; form.Close(); form.Dispose();
         AppLog.Write("Exited; microphone closed and models released."); ExitThread();

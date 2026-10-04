@@ -18,6 +18,7 @@ internal static class Program
             dynamic shortcut = shell.CreateShortcut(shortcutPath);
             shortcut.TargetPath = Environment.ProcessPath;
             shortcut.WorkingDirectory = AppContext.BaseDirectory;
+            shortcut.IconLocation = Environment.ProcessPath + ",0";
             shortcut.Description = "Local voice dictation. Ctrl+Alt+Space starts and stops recording.";
             shortcut.Save();
             File.WriteAllText(Path.Combine(AppSettings.Root, "installation.json"), JsonSerializer.Serialize(new { executable = Environment.ProcessPath, shortcut = shortcutPath, startup = AppSettings.Startup, registered = DateTimeOffset.Now }));

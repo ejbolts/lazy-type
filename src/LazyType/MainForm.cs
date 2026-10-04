@@ -1,204 +1,569 @@
+using System.Drawing.Drawing2D;
+
 namespace LazyType;
 
 internal sealed class MainForm : Form
 {
-    private readonly Label status = new();
-    private readonly Label detail = new();
-    private readonly Button pause = new();
-    private readonly Label shortcut = new();
-    public readonly TextBox Result = new();
-    public readonly TextBox Original = new();
+    private readonly Label greeting = new();
+    private readonly Label statusDetail = new();
+    private readonly Panel statusDot = new();
+    private Color dotColor = Color.FromArgb(16, 185, 129); // Green for ready
+
+    // Dictation shortcut card
+    private readonly Panel shortcutCard = new();
+    private readonly Label shortcutAction = new();
+    private string currentHotkey = "Ctrl+Alt+Space";
+
+    // Setting rows controls
     public readonly ComboBox Mic = new();
+    public readonly ModernCheckBox Clean = new();
+    public readonly ModernCheckBox Suggestions = new();
+    public readonly ModernCheckBox Startup = new();
     public readonly ComboBox HotkeyChoice = new();
     public readonly ComboBox ThemeChoice = new();
     public readonly ComboBox PopupThemeChoice = new();
-    public event Action? PreviewPopupRequested;
-    public readonly CheckBox Clean = new();
-    public readonly CheckBox Suggestions = new();
-    public readonly CheckBox Startup = new();
+
+    // Last result card
+    private readonly Panel resultCard = new();
+    public readonly TextBox Result = new();
+    public readonly TextBox Original = new();
     private readonly WandButton suggest = new();
+    private readonly ModernButton copyBtn = new();
+    private readonly System.Windows.Forms.Timer copyFeedbackTimer = new() { Interval = 1600 };
+    private readonly Panel accordionHeader = new();
+    private readonly Label accordionLabel = new();
+    private readonly Panel accordionBody = new();
+    private bool accordionExpanded;
+
+    // Footer
+    private readonly ModernButton pauseBtn = new();
+    private readonly ModernButton hideBtn = new();
+    private readonly ModernButton gearBtn = new();
+    private readonly ContextMenuStrip settingsMenu = new();
+
     private readonly ToolTip tips = new();
-    private readonly ToolTip memoryTip = new()
-    {
-        ToolTipTitle = "Memory with all models loaded",
-        InitialDelay = 350, ReshowDelay = 100, AutoPopDelay = 20000, ShowAlways = true
-    };
-    private readonly Label memoryInfo = new() { Text = "ⓘ", AccessibleName = "Model memory information", Dock = DockStyle.Right, Width = 28, TextAlign = ContentAlignment.MiddleCenter, Cursor = Cursors.Help, ForeColor = Color.FromArgb(65, 98, 211), TabStop = true };
+    private bool isDark;
+    private bool isPaused;
     private bool suggestionBusy;
+
     public event Action? PauseRequested;
     public event Action? QuitRequested;
     public event Action<int>? HotkeyPressed;
     public event Action? ImportRequested;
     public event Action? SuggestionRequested;
+    public event Action? PreviewPopupRequested;
     public bool Quitting;
 
     public MainForm()
     {
-        Text = "Lazy Type"; Font = new Font("Segoe UI", 10); AutoScaleMode = AutoScaleMode.Dpi;
-        BackColor = Color.FromArgb(246, 247, 250); ForeColor = Color.FromArgb(31, 42, 59);
-        ClientSize = new Size(690, 866); MinimumSize = new Size(706, 904);
+        Text = "Lazy Type";
+        Font = new Font("Segoe UI", 10f);
+        AutoScaleMode = AutoScaleMode.Dpi;
+        ClientSize = new Size(580, 720);
+        MinimumSize = new Size(520, 680);
         StartPosition = FormStartPosition.CenterScreen;
-        Icon = Native.MakeIcon(Color.FromArgb(65, 98, 211));
+        Icon = Native.MakeIcon(Color.FromArgb(127, 86, 217));
+        DoubleBuffered = true;
 
-        var root = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 15, Padding = new Padding(22, 18, 22, 18) };
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 46));
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 102));
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 28));
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 41));
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 41));
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 41));
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 41));
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 28));
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 40));
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 28));
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 28));
-        root.RowStyles.Add(new RowStyle(SizeType.Percent, 65));
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 26));
-        root.RowStyles.Add(new RowStyle(SizeType.Percent, 35));
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 50));
+        var root = new Panel { Dock = DockStyle.Fill, Padding = new Padding(24, 20, 24, 16) };
         Controls.Add(root);
 
-        var heading = new Label { Text = "Lazy Type", Font = new Font("Segoe UI", 23, FontStyle.Bold), Dock = DockStyle.Fill };
-        root.Controls.Add(heading, 0, 0);
+        // --- 1. Header (Greeting + status dot + explanation) ---
+        var headerPanel = new Panel { Dock = DockStyle.Top, Height = 64 };
 
-        var card = new Panel { BackColor = Color.White, Dock = DockStyle.Fill, Padding = new Padding(14) };
-        status.Text = "Getting ready"; status.Font = new Font("Segoe UI", 13, FontStyle.Bold); status.SetBounds(14, 12, 565, 26);
-        detail.SetBounds(14, 42, 595, 38); detail.Font = new Font("Segoe UI", 9); detail.Text = "Whisper Turbo + Qwen 3 · Fully local · Microphone off";
-        card.Controls.AddRange(new Control[] { status, detail }); root.Controls.Add(card, 0, 1);
+        statusDot.SetBounds(0, 8, 12, 12);
+        statusDot.Paint += (_, e) =>
+        {
+            e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+            using var b = new SolidBrush(dotColor);
+            e.Graphics.FillEllipse(b, 1, 1, 10, 10);
+        };
 
-        shortcut.Dock = DockStyle.Fill; shortcut.TextAlign = ContentAlignment.MiddleLeft; root.Controls.Add(shortcut, 0, 2);
-        root.Controls.Add(Row("Microphone", Mic), 0, 3);
-        root.Controls.Add(Row("Dictation hotkey", HotkeyChoice), 0, 4);
-        root.Controls.Add(Row("App theme", ThemeChoice), 0, 5);
+        greeting.Text = "Ready when you are";
+        greeting.Font = new Font("Segoe UI", 16f, FontStyle.Bold);
+        greeting.SetBounds(20, 0, 480, 32);
 
-        var popupRow = Row("Popup theme", PopupThemeChoice);
-        var preview = new Button { Text = "Preview", Dock = DockStyle.Right, Width = 85 };
-        preview.Click += (_, _) => PreviewPopupRequested?.Invoke();
-        var popupPanel = new Panel { Dock = DockStyle.Fill };
-        popupPanel.Controls.Add(popupRow); popupPanel.Controls.Add(preview);
-        root.Controls.Add(popupPanel, 0, 6);
+        statusDetail.Text = "Everything stays on your device.";
+        statusDetail.Font = new Font("Segoe UI", 9.5f, FontStyle.Regular);
+        statusDetail.SetBounds(22, 32, 500, 24);
 
-        var memoryRow = new Panel { Dock = DockStyle.Fill };
-        var memoryNote = new Label { Text = "Memory: loads on demand · frees after dictation or suggestions", Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft };
-        const string memoryDetails = "RAM: approximately 1.0 GiB for the model workers (app extra).\nGPU: approximately 4.2 GiB of additional VRAM.\nWhisper + Qwen + speech detection · RTX 4080, 5 Oct 2026.\nWarm sample after a short test; not a live reading or peak.\nModels unload after each dictation. Usage varies.";
-        memoryTip.SetToolTip(memoryNote, memoryDetails);
-        memoryTip.SetToolTip(memoryInfo, memoryDetails);
-        memoryInfo.AccessibleDescription = memoryDetails;
-        memoryInfo.Enter += (_, _) => memoryTip.Show(memoryDetails, memoryInfo, 0, memoryInfo.Height, 20000);
-        memoryInfo.Leave += (_, _) => memoryTip.Hide(memoryInfo);
-        memoryRow.Controls.Add(memoryNote); memoryRow.Controls.Add(memoryInfo);
-        root.Controls.Add(memoryRow, 0, 7);
+        headerPanel.Controls.Add(statusDot);
+        headerPanel.Controls.Add(greeting);
+        headerPanel.Controls.Add(statusDetail);
 
-        var checks = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false };
-        Clean.Text = "Clean up speech locally"; Clean.AutoSize = true;
-        Startup.Text = "Start with Windows"; Startup.AutoSize = true; Startup.Margin = new Padding(24, 3, 3, 3);
-        checks.Controls.AddRange(new Control[] { Clean, Startup }); root.Controls.Add(checks, 0, 8);
+        // --- 2. Interactive Dictation Shortcut Card ---
+        shortcutCard.Dock = DockStyle.Top;
+        shortcutCard.Height = 52;
+        shortcutCard.Cursor = Cursors.Hand;
+        shortcutCard.Paint += PaintShortcutCard;
+        shortcutCard.Click += (_, _) => CycleHotkey();
 
-        Suggestions.Text = "AI suggestions · show a wand after dictation"; Suggestions.AutoSize = true;
-        tips.SetToolTip(Suggestions, "Offer a local rewrite when you click the wand. You review it before applying.");
-        root.Controls.Add(Suggestions, 0, 9);
+        shortcutAction.Text = "Start or stop dictation";
+        shortcutAction.Font = new Font("Segoe UI", 9.5f, FontStyle.Regular);
+        shortcutAction.Dock = DockStyle.Right;
+        shortcutAction.Width = 180;
+        shortcutAction.TextAlign = ContentAlignment.MiddleRight;
+        shortcutAction.Cursor = Cursors.Hand;
+        shortcutAction.Click += (_, _) => CycleHotkey();
+        shortcutCard.Controls.Add(shortcutAction);
 
-        root.Controls.Add(new Label { Text = "LAST RESULT  ·  kept only until you quit", Dock = DockStyle.Fill, Font = new Font("Segoe UI", 9, FontStyle.Bold) }, 0, 10);
+        // --- 3. Settings Rows ---
+        var settingsContainer = new Panel { Dock = DockStyle.Top, Height = 210, Padding = new Padding(0, 10, 0, 10) };
 
-        var resultPanel = new Panel { Dock = DockStyle.Fill, Margin = new Padding(3) };
-        var resultActions = new Panel { Dock = DockStyle.Right, Width = 43 };
-        suggest.Dock = DockStyle.Bottom; suggest.Height = 36; suggest.Visible = false;
-        tips.SetToolTip(suggest, "Suggest clearer wording and grammar");
+        // Setting 1: Microphone
+        var micRow = CreateSettingRow(g => VectorIcons.DrawMicrophone(g, new Rectangle(0, 0, 20, 20), GetIconColor()),
+            "Microphone", null, Mic);
+        Mic.DropDownStyle = ComboBoxStyle.DropDownList;
+        Mic.Width = 220;
+        Mic.Dock = DockStyle.Right;
+
+        // Setting 2: Clean up speech
+        var cleanRow = CreateSettingRow(g => VectorIcons.DrawCleanSpeech(g, new Rectangle(0, 0, 20, 20), GetIconColor()),
+            "Clean up speech", null, Clean);
+
+        // Setting 3: AI suggestions
+        var suggestionsRow = CreateSettingRow(g => PolishIcon.Draw(g, new Rectangle(0, 0, 20, 20), Color.FromArgb(127, 86, 217)),
+            "AI suggestions", "Show a polish icon after dictation to refine wording", Suggestions);
+
+        // Setting 4: Start with Windows
+        var startupRow = CreateSettingRow(g => VectorIcons.DrawWindowsLogo(g, new Rectangle(0, 0, 18, 18), GetIconColor()),
+            "Start with Windows", null, Startup);
+
+        settingsContainer.Controls.Add(startupRow);
+        settingsContainer.Controls.Add(suggestionsRow);
+        settingsContainer.Controls.Add(cleanRow);
+        settingsContainer.Controls.Add(micRow);
+
+        // Layout rows vertically
+        micRow.Dock = DockStyle.Top;
+        cleanRow.Dock = DockStyle.Top;
+        suggestionsRow.Dock = DockStyle.Top;
+        startupRow.Dock = DockStyle.Top;
+
+        // --- 4. Last result card ---
+        resultCard.Dock = DockStyle.Fill;
+        resultCard.Padding = new Padding(16, 12, 16, 12);
+        resultCard.Paint += PaintResultCard;
+
+        var resultHeader = new Panel { Dock = DockStyle.Top, Height = 32 };
+        var resultTitle = new Label { Text = "Last result", Font = new Font("Segoe UI", 10.5f, FontStyle.Bold), AutoSize = false };
+        resultTitle.SetBounds(0, 4, 150, 24);
+
+        copyBtn.Text = "Copy";
+        copyBtn.Style = ModernButton.ButtonStyle.Secondary;
+        copyBtn.CornerRadius = 6;
+        copyBtn.SetBounds(resultHeader.Width - 75, 0, 72, 28);
+        copyBtn.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+        copyBtn.IconDrawAction = (g, rect, col) => VectorIcons.DrawCopy(g, rect, col);
+        copyBtn.Click += (_, _) =>
+        {
+            if (!string.IsNullOrEmpty(Result.Text))
+            {
+                try { Clipboard.SetText(Result.Text); } catch { }
+                copyBtn.Text = "Copied!";
+                copyFeedbackTimer.Stop();
+                copyFeedbackTimer.Start();
+            }
+        };
+        copyFeedbackTimer.Tick += (_, _) =>
+        {
+            copyFeedbackTimer.Stop();
+            copyBtn.Text = "Copy";
+        };
+
+        resultHeader.Controls.Add(resultTitle);
+        resultHeader.Controls.Add(copyBtn);
+
+        // Result editor area
+        var editorPanel = new Panel { Dock = DockStyle.Fill, Padding = new Padding(0, 6, 0, 6) };
+        Result.Multiline = true;
+        Result.ScrollBars = ScrollBars.Vertical;
+        Result.Dock = DockStyle.Fill;
+        Result.BorderStyle = BorderStyle.None;
+        Result.Font = new Font("Segoe UI", 10.5f);
+
+        // Floating polish button inside result card
+        suggest.SetBounds(editorPanel.Width - 46, editorPanel.Height - 46, 36, 36);
+        suggest.Anchor = AnchorStyles.Bottom | AnchorStyles.Right;
+        suggest.Visible = false;
         suggest.Click += (_, _) => SuggestionRequested?.Invoke();
-        resultActions.Controls.Add(suggest);
-        SetEditor(Result);
-        resultPanel.Controls.Add(Result);
-        resultPanel.Controls.Add(resultActions);
-        root.Controls.Add(resultPanel, 0, 11);
+        tips.SetToolTip(suggest, "A little polish · Refine wording with dual sparkle stars");
 
-        Suggestions.CheckedChanged += (_, _) => { resultActions.Visible = Suggestions.Checked; UpdateSuggestionButton(); };
-        Result.TextChanged += (_, _) => UpdateSuggestionButton();
-        resultActions.Visible = false;
+        editorPanel.Controls.Add(suggest);
+        editorPanel.Controls.Add(Result);
 
-        root.Controls.Add(new Label { Text = "Original transcript", Dock = DockStyle.Fill, Font = new Font("Segoe UI", 9) }, 0, 12);
-        SetEditor(Original); Original.ReadOnly = true; root.Controls.Add(Original, 0, 13);
+        // Accordion for Original transcript
+        var accordionContainer = new Panel { Dock = DockStyle.Bottom, AutoSize = true };
+        accordionHeader.Dock = DockStyle.Top;
+        accordionHeader.Height = 28;
+        accordionHeader.Cursor = Cursors.Hand;
+        accordionHeader.Paint += PaintAccordionHeader;
+        accordionHeader.Click += (_, _) => ToggleAccordion();
 
-        var buttons = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false, Padding = new Padding(0, 10, 0, 0) };
-        pause.Text = "Pause && free memory"; pause.Width = 170; pause.Height = 32; pause.Click += (_, _) => PauseRequested?.Invoke();
-        var copy = new Button { Text = "Copy result", Width = 105, Height = 32 }; copy.Click += (_, _) => { if (Result.TextLength > 0) try { Clipboard.SetText(Result.Text); } catch { } };
-        var import = new Button { Text = "Test WAV…", Width = 102, Height = 32 }; import.Click += (_, _) => ImportRequested?.Invoke();
-        var hide = new Button { Text = "Hide", Width = 70, Height = 32 }; hide.Click += (_, _) => Hide();
-        var quit = new Button { Text = "Quit", Width = 65, Height = 32 }; quit.Click += (_, _) => QuitRequested?.Invoke();
-        buttons.Controls.AddRange(new Control[] { pause, copy, import, hide, quit }); root.Controls.Add(buttons, 0, 14);
+        accordionLabel.Text = "Original transcript";
+        accordionLabel.Font = new Font("Segoe UI", 9f);
+        accordionLabel.SetBounds(22, 4, 200, 20);
+        accordionLabel.Cursor = Cursors.Hand;
+        accordionLabel.Click += (_, _) => ToggleAccordion();
+        accordionHeader.Controls.Add(accordionLabel);
 
+        accordionBody.Dock = DockStyle.Top;
+        accordionBody.Height = 70;
+        accordionBody.Visible = false;
+        accordionBody.Padding = new Padding(0, 4, 0, 0);
+
+        Original.Multiline = true;
+        Original.ScrollBars = ScrollBars.Vertical;
+        Original.ReadOnly = true;
+        Original.Dock = DockStyle.Fill;
+        Original.BorderStyle = BorderStyle.None;
+        Original.Font = new Font("Segoe UI", 9.5f);
+        accordionBody.Controls.Add(Original);
+
+        accordionContainer.Controls.Add(accordionBody);
+        accordionContainer.Controls.Add(accordionHeader);
+
+        resultCard.Controls.Add(editorPanel);
+        resultCard.Controls.Add(accordionContainer);
+        resultCard.Controls.Add(resultHeader);
+
+        // --- 5. Footer Bar ---
+        var footerBar = new Panel { Dock = DockStyle.Bottom, Height = 50, Padding = new Padding(0, 10, 0, 0) };
+
+        pauseBtn.Text = "Pause dictation";
+        pauseBtn.Style = ModernButton.ButtonStyle.Secondary;
+        pauseBtn.SetBounds(0, 10, 140, 36);
+        pauseBtn.IconDrawAction = (g, rect, col) => { if (isPaused) VectorIcons.DrawPlay(g, rect, col); else VectorIcons.DrawPause(g, rect, col); };
+        pauseBtn.Click += (_, _) => PauseRequested?.Invoke();
+
+        hideBtn.Text = "Hide";
+        hideBtn.Style = ModernButton.ButtonStyle.Secondary;
+        hideBtn.SetBounds(148, 10, 80, 36);
+        hideBtn.IconDrawAction = (g, rect, col) => VectorIcons.DrawEye(g, rect, col);
+        hideBtn.Click += (_, _) => Hide();
+
+        gearBtn.Text = "";
+        gearBtn.Style = ModernButton.ButtonStyle.IconOnly;
+        gearBtn.SetBounds(footerBar.Width - 44, 10, 38, 36);
+        gearBtn.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+        gearBtn.IconDrawAction = (g, rect, col) => VectorIcons.DrawGear(g, rect, col);
+        gearBtn.Click += (_, _) => settingsMenu.Show(gearBtn, new Point(gearBtn.Width - settingsMenu.Width, gearBtn.Height + 4));
+
+        footerBar.Controls.AddRange(new Control[] { pauseBtn, hideBtn, gearBtn });
+
+        // Assemble root layout
+        root.Controls.Add(resultCard);
+        root.Controls.Add(settingsContainer);
+        root.Controls.Add(shortcutCard);
+        root.Controls.Add(headerPanel);
+        root.Controls.Add(footerBar);
+
+        // Setup hidden combos for ThemeController compatibility & settings menu
         HotkeyChoice.Items.AddRange(new object[] { "Ctrl+Alt+Space", "Ctrl+Shift+Space", "F8" });
         ThemeChoice.Items.AddRange(new object[] { "System", "Light", "Dark" });
         PopupThemeChoice.Items.AddRange(new object[] { "Follow app", "Light", "Dark" });
 
+        SetupSettingsMenu();
+
+        Suggestions.CheckedChanged += (_, _) => UpdateSuggestionButton();
+        Result.TextChanged += (_, _) => UpdateSuggestionButton();
+
         FormClosing += (_, e) => { if (!Quitting) { e.Cancel = true; Hide(); } };
     }
 
-    private static Control Row(string title, ComboBox input)
+    private void CycleHotkey()
     {
-        var row = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2 };
-        row.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 153)); row.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        row.Controls.Add(new Label { Text = title, AutoSize = true, Margin = new Padding(0, 6, 0, 0) }, 0, 0);
-        input.AccessibleName = title; input.DropDownStyle = ComboBoxStyle.DropDownList; input.Dock = DockStyle.Top; row.Controls.Add(input, 1, 0);
+        if (HotkeyChoice.Items.Count == 0) return;
+        int next = (HotkeyChoice.SelectedIndex + 1) % HotkeyChoice.Items.Count;
+        HotkeyChoice.SelectedIndex = next;
+    }
+
+    private Color GetIconColor() => isDark ? Color.FromArgb(170, 180, 200) : Color.FromArgb(102, 112, 133);
+
+    private Panel CreateSettingRow(Action<Graphics> drawIcon, string title, string? subtitle, Control rightControl)
+    {
+        var row = new Panel { Height = subtitle != null ? 52 : 44, Padding = new Padding(4, 4, 4, 4) };
+
+        var iconBox = new Panel { Width = 28, Height = 28, Location = new Point(4, (row.Height - 28) / 2) };
+        iconBox.Paint += (_, e) => drawIcon(e.Graphics);
+
+        int labelX = 36;
+        var lblTitle = new Label
+        {
+            Text = title,
+            Font = new Font("Segoe UI", 10f, FontStyle.Regular),
+            AutoSize = false,
+            Location = new Point(labelX, subtitle != null ? 6 : (row.Height - 24) / 2),
+            Size = new Size(240, 22),
+            TextAlign = ContentAlignment.MiddleLeft,
+            Cursor = (rightControl is ModernCheckBox) ? Cursors.Hand : Cursors.Default
+        };
+
+        if (rightControl is ModernCheckBox cb)
+        {
+            lblTitle.Click += (_, _) => cb.Checked = !cb.Checked;
+            iconBox.Click += (_, _) => cb.Checked = !cb.Checked;
+            row.Click += (_, _) => cb.Checked = !cb.Checked;
+            cb.Location = new Point(row.Width - 34, (row.Height - 24) / 2);
+            cb.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+            cb.Size = new Size(26, 24);
+        }
+        else
+        {
+            rightControl.Location = new Point(row.Width - rightControl.Width - 4, (row.Height - rightControl.Height) / 2);
+            rightControl.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+        }
+
+        row.Controls.Add(iconBox);
+        row.Controls.Add(lblTitle);
+        if (subtitle != null)
+        {
+            var lblSub = new Label
+            {
+                Text = subtitle,
+                Font = new Font("Segoe UI", 8.5f),
+                ForeColor = isDark ? Color.FromArgb(150, 160, 180) : Color.FromArgb(120, 130, 145),
+                AutoSize = false,
+                Location = new Point(labelX, 28),
+                Size = new Size(340, 18),
+                TextAlign = ContentAlignment.MiddleLeft,
+                Cursor = (rightControl is ModernCheckBox) ? Cursors.Hand : Cursors.Default
+            };
+            if (rightControl is ModernCheckBox cb2) lblSub.Click += (_, _) => cb2.Checked = !cb2.Checked;
+            row.Controls.Add(lblSub);
+        }
+        row.Controls.Add(rightControl);
         return row;
     }
 
-    private static void SetEditor(TextBox editor) { editor.Multiline = true; editor.ScrollBars = ScrollBars.Vertical; editor.Dock = DockStyle.Fill; editor.BackColor = Color.White; editor.BorderStyle = BorderStyle.FixedSingle; }
+    private void ToggleAccordion()
+    {
+        accordionExpanded = !accordionExpanded;
+        accordionBody.Visible = accordionExpanded;
+        accordionHeader.Invalidate();
+    }
+
+    private void PaintAccordionHeader(object? sender, PaintEventArgs e)
+    {
+        var g = e.Graphics;
+        g.SmoothingMode = SmoothingMode.AntiAlias;
+        Color col = isDark ? Color.FromArgb(170, 180, 200) : Color.FromArgb(102, 112, 133);
+        VectorIcons.DrawChevron(g, new Rectangle(4, 7, 14, 14), col, accordionExpanded);
+    }
+
+    private void PaintShortcutCard(object? sender, PaintEventArgs e)
+    {
+        var g = e.Graphics;
+        g.SmoothingMode = SmoothingMode.AntiAlias;
+
+        var bounds = new Rectangle(0, 0, shortcutCard.Width - 1, shortcutCard.Height - 1);
+        Color cardBg = isDark ? Color.FromArgb(28, 33, 46) : Color.White;
+        Color cardBorder = isDark ? Color.FromArgb(45, 52, 68) : Color.FromArgb(230, 235, 245);
+
+        using var bgBrush = new SolidBrush(cardBg);
+        DrawingHelpers.FillRoundedRectangle(g, bgBrush, bounds, 10);
+        using var borderPen = new Pen(cardBorder, 1.2f);
+        DrawingHelpers.DrawRoundedRectangle(g, borderPen, bounds, 10);
+
+        // Draw keycaps based on currentHotkey
+        var keys = currentHotkey.Split('+');
+        int x = 12;
+        int y = (shortcutCard.Height - 26) / 2;
+
+        Color keyBg = isDark ? Color.FromArgb(42, 49, 66) : Color.FromArgb(243, 244, 248);
+        Color keyBorder = isDark ? Color.FromArgb(60, 70, 90) : Color.FromArgb(215, 220, 230);
+        Color keyFg = isDark ? Color.FromArgb(230, 235, 245) : Color.FromArgb(50, 60, 80);
+        using var kBrush = new SolidBrush(keyBg);
+        using var kPen = new Pen(keyBorder, 1f);
+
+        for (int i = 0; i < keys.Length; i++)
+        {
+            var keyText = keys[i];
+            int keyW = Math.Max(36, TextRenderer.MeasureText(keyText, Font).Width + 16);
+            var kRect = new Rectangle(x, y, keyW, 26);
+
+            DrawingHelpers.FillRoundedRectangle(g, kBrush, kRect, 5);
+            DrawingHelpers.DrawRoundedRectangle(g, kPen, kRect, 5);
+            TextRenderer.DrawText(g, keyText, new Font("Segoe UI", 9f, FontStyle.Bold), kRect, keyFg, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
+
+            x += keyW + 6;
+            if (i < keys.Length - 1)
+            {
+                TextRenderer.DrawText(g, "+", Font, new Rectangle(x - 2, y, 10, 26), keyFg, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
+                x += 12;
+            }
+        }
+
+        // Draw subtle vertical divider before action label
+        int divX = shortcutCard.Width - 190;
+        using var divPen = new Pen(cardBorder, 1f);
+        g.DrawLine(divPen, divX, y + 2, divX, y + 24);
+    }
+
+    private void PaintResultCard(object? sender, PaintEventArgs e)
+    {
+        var g = e.Graphics;
+        g.SmoothingMode = SmoothingMode.AntiAlias;
+
+        var bounds = new Rectangle(0, 0, resultCard.Width - 1, resultCard.Height - 1);
+        Color cardBg = isDark ? Color.FromArgb(24, 28, 38) : Color.White;
+        Color cardBorder = isDark ? Color.FromArgb(45, 52, 68) : Color.FromArgb(230, 235, 245);
+
+        using var bgBrush = new SolidBrush(cardBg);
+        DrawingHelpers.FillRoundedRectangle(g, bgBrush, bounds, 12);
+        using var borderPen = new Pen(cardBorder, 1.2f);
+        DrawingHelpers.DrawRoundedRectangle(g, borderPen, bounds, 12);
+    }
+
+    private void SetupSettingsMenu()
+    {
+        settingsMenu.Items.Clear();
+
+        var themeHeader = new ToolStripMenuItem("Theme") { Enabled = false };
+        settingsMenu.Items.Add(themeHeader);
+        foreach (string t in new[] { "System", "Light", "Dark" })
+        {
+            var item = new ToolStripMenuItem("  " + t, null, (_, _) => { ThemeChoice.SelectedItem = t; });
+            settingsMenu.Items.Add(item);
+        }
+
+        settingsMenu.Items.Add(new ToolStripSeparator());
+
+        var popupHeader = new ToolStripMenuItem("Popup theme") { Enabled = false };
+        settingsMenu.Items.Add(popupHeader);
+        foreach (string pt in new[] { "Follow app", "Light", "Dark" })
+        {
+            var item = new ToolStripMenuItem("  " + pt, null, (_, _) => { PopupThemeChoice.SelectedItem = pt; });
+            settingsMenu.Items.Add(item);
+        }
+
+        settingsMenu.Items.Add(new ToolStripSeparator());
+
+        var hotkeyHeader = new ToolStripMenuItem("Dictation shortcut") { Enabled = false };
+        settingsMenu.Items.Add(hotkeyHeader);
+        foreach (string hk in new[] { "Ctrl+Alt+Space", "Ctrl+Shift+Space", "F8" })
+        {
+            var item = new ToolStripMenuItem("  " + hk, null, (_, _) => { HotkeyChoice.SelectedItem = hk; });
+            settingsMenu.Items.Add(item);
+        }
+
+        settingsMenu.Items.Add(new ToolStripSeparator());
+
+        settingsMenu.Items.Add("Preview suggestion popup", null, (_, _) => PreviewPopupRequested?.Invoke());
+        settingsMenu.Items.Add("Test with WAV audio…", null, (_, _) => ImportRequested?.Invoke());
+
+        settingsMenu.Items.Add(new ToolStripSeparator());
+        settingsMenu.Items.Add("Quit Lazy Type", null, (_, _) => QuitRequested?.Invoke());
+    }
 
     public void ApplyTheme(bool dark)
     {
-        var background = dark ? Color.FromArgb(25, 28, 35) : Color.FromArgb(246, 247, 250);
-        var surface = dark ? Color.FromArgb(38, 43, 53) : Color.White;
-        var foreground = dark ? Color.FromArgb(235, 239, 246) : Color.FromArgb(31, 42, 59);
-        void PaintControls(Control parent)
-        {
-            foreach (Control control in parent.Controls)
-            {
-                if (control is WandButton wand)
-                {
-                    wand.BackColor = dark ? Color.FromArgb(50, 40, 80) : Color.FromArgb(239, 235, 255);
-                    wand.ForeColor = dark ? Color.FromArgb(180, 150, 255) : Color.FromArgb(102, 65, 191);
-                    continue;
-                }
-                if (control == memoryInfo)
-                {
-                    memoryInfo.ForeColor = dark ? Color.FromArgb(145, 175, 255) : Color.FromArgb(65, 98, 211);
-                    continue;
-                }
-                control.ForeColor = foreground;
-                control.BackColor = control is TextBox or ComboBox or Button || control == status.Parent ? surface : parent.BackColor;
-                if (control is Button button)
-                {
-                    button.UseVisualStyleBackColor = false;
-                    button.FlatStyle = FlatStyle.Flat;
-                    button.FlatAppearance.BorderColor = dark ? Color.FromArgb(80, 88, 105) : Color.FromArgb(200, 205, 215);
-                }
-                if (control is ComboBox combo) combo.FlatStyle = FlatStyle.Flat;
-                PaintControls(control);
-            }
-        }
-        BackColor = background; ForeColor = foreground; PaintControls(this);
-        var useDark = dark ? 1 : 0;
+        isDark = dark;
+        BackColor = dark ? Color.FromArgb(16, 20, 28) : Color.FromArgb(248, 249, 252);
+        ForeColor = dark ? Color.FromArgb(240, 242, 248) : Color.FromArgb(30, 41, 59);
+
+        greeting.ForeColor = ForeColor;
+        statusDetail.ForeColor = dark ? Color.FromArgb(150, 165, 185) : Color.FromArgb(100, 116, 139);
+        shortcutAction.ForeColor = dark ? Color.FromArgb(160, 175, 200) : Color.FromArgb(100, 116, 139);
+        accordionLabel.ForeColor = dark ? Color.FromArgb(160, 175, 200) : Color.FromArgb(100, 116, 139);
+
+        Clean.IsDark = dark;
+        Suggestions.IsDark = dark;
+        Startup.IsDark = dark;
+
+        Result.BackColor = dark ? Color.FromArgb(24, 28, 38) : Color.White;
+        Result.ForeColor = ForeColor;
+
+        Original.BackColor = dark ? Color.FromArgb(20, 24, 32) : Color.FromArgb(245, 247, 250);
+        Original.ForeColor = dark ? Color.FromArgb(180, 190, 205) : Color.FromArgb(70, 80, 95);
+
+        pauseBtn.IsDark = dark;
+        hideBtn.IsDark = dark;
+        gearBtn.IsDark = dark;
+        copyBtn.IsDark = dark;
+
+        suggest.BackColor = dark ? Color.FromArgb(48, 36, 80) : Color.FromArgb(243, 238, 255);
+        suggest.ForeColor = Color.FromArgb(127, 86, 217);
+
+        int useDark = dark ? 1 : 0;
         Native.DwmSetWindowAttribute(Handle, 20, ref useDark, sizeof(int));
+
+        shortcutCard.Invalidate();
+        resultCard.Invalidate();
+        accordionHeader.Invalidate();
         Invalidate(true);
     }
 
     public void SetStatus(string title, string explanation, bool paused)
     {
-        status.Text = title; detail.Text = explanation; pause.Text = paused ? "Resume dictation" : "Pause && free memory";
+        isPaused = paused;
+        greeting.Text = paused ? "Dictation paused" : title.Contains("Listening") ? "Listening…" : "Ready when you are";
+        statusDetail.Text = explanation;
+
+        if (paused)
+        {
+            dotColor = Color.FromArgb(245, 158, 11); // Orange
+            pauseBtn.Text = "Resume dictation";
+        }
+        else if (title.Contains("Listening") || title.Contains("recording"))
+        {
+            dotColor = Color.FromArgb(239, 68, 68); // Red
+            pauseBtn.Text = "Pause dictation";
+        }
+        else if (title.Contains("Clean") || title.Contains("Suggesting") || title.Contains("Transcrib"))
+        {
+            dotColor = Color.FromArgb(127, 86, 217); // Purple
+            pauseBtn.Text = "Pause dictation";
+        }
+        else
+        {
+            dotColor = Color.FromArgb(16, 185, 129); // Green
+            pauseBtn.Text = "Pause dictation";
+        }
+
+        statusDot.Invalidate();
+        pauseBtn.Invalidate();
     }
 
-    public void SetShortcut(string text) => shortcut.Text = text + " to start / stop  ·  add " + (text == "Ctrl+Shift+Space" ? "Alt" : "Shift") + " for raw text  ·  Esc cancels";
-    public void SetSuggestionBusy(bool busy) { suggestionBusy = busy; UpdateSuggestionButton(); }
+    public void SetShortcut(string text)
+    {
+        currentHotkey = text;
+        shortcutCard.Invalidate();
+    }
+
+    public void SetSuggestionBusy(bool busy)
+    {
+        suggestionBusy = busy;
+        UpdateSuggestionButton();
+    }
+
     private void UpdateSuggestionButton()
     {
         suggest.Visible = Suggestions.Checked && !string.IsNullOrWhiteSpace(Result.Text);
         suggest.Enabled = !suggestionBusy;
     }
-    public void ShowWindow() { Show(); WindowState = FormWindowState.Normal; Activate(); }
-    protected override void WndProc(ref Message m) { if (m.Msg == Native.WM_HOTKEY) HotkeyPressed?.Invoke(m.WParam.ToInt32()); base.WndProc(ref m); }
+
+    public void ShowWindow()
+    {
+        Show();
+        WindowState = FormWindowState.Normal;
+        Activate();
+    }
+
+    protected override void WndProc(ref Message m)
+    {
+        if (m.Msg == Native.WM_HOTKEY) HotkeyPressed?.Invoke(m.WParam.ToInt32());
+        base.WndProc(ref m);
+    }
+
     protected override void Dispose(bool disposing)
     {
-        if (disposing) { tips.Dispose(); memoryTip.Dispose(); }
+        if (disposing)
+        {
+            tips.Dispose();
+            copyFeedbackTimer.Dispose();
+            settingsMenu.Dispose();
+        }
         base.Dispose(disposing);
     }
 }

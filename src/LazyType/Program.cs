@@ -1,4 +1,6 @@
 using System.Diagnostics;
+using System.Drawing;
+using System.Drawing.Imaging;
 using System.IO.Pipes;
 using System.Text.Json;
 
@@ -9,6 +11,51 @@ internal static class Program
     [STAThread]
     private static int Main(string[] args)
     {
+        if (args.Contains("--render-snapshot"))
+        {
+            var idx = Array.IndexOf(args, "--render-snapshot");
+            var outDir = idx >= 0 && idx + 1 < args.Length ? args[idx + 1] : ".";
+            Directory.CreateDirectory(outDir);
+
+            System.Windows.Forms.Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
+            System.Windows.Forms.Application.EnableVisualStyles();
+            System.Windows.Forms.Application.SetCompatibleTextRenderingDefault(false);
+
+            using var form = new MainForm();
+            form.Result.Text = "Thanks for sending this over. The layout looks much cleaner now, and dictation responds immediately without leaving the foreground window.";
+            form.Original.Text = "thanks for sending this over the layout looks much cleaner now and dictation responds immediately without leaving the foreground window";
+            form.Clean.Checked = true;
+            form.Suggestions.Checked = true;
+            form.Startup.Checked = true;
+            form.Mic.Items.Add("Microphone Array (Realtek Audio)");
+            form.Mic.SelectedIndex = 0;
+            form.Show();
+            System.Windows.Forms.Application.DoEvents();
+            Thread.Sleep(300);
+
+            using (var bmp = new Bitmap(form.Width, form.Height))
+            {
+                form.DrawToBitmap(bmp, new Rectangle(0, 0, form.Width, form.Height));
+                bmp.Save(Path.Combine(outDir, "main_form_rendered.png"), ImageFormat.Png);
+            }
+
+            using var sugg = new SuggestionForm("thanks for sending this over", false, false);
+            sugg.ShowSuggestion("Thanks for sending this over. The new layout is much clearer.", true, true);
+            sugg.Show();
+            System.Windows.Forms.Application.DoEvents();
+            Thread.Sleep(300);
+
+            using (var bmpSugg = new Bitmap(sugg.Width, sugg.Height))
+            {
+                sugg.DrawToBitmap(bmpSugg, new Rectangle(0, 0, sugg.Width, sugg.Height));
+                bmpSugg.Save(Path.Combine(outDir, "suggestion_form_rendered.png"), ImageFormat.Png);
+            }
+
+            form.Close();
+            sugg.Close();
+            return 0;
+        }
+
         if (args.Contains("--memory-test")) return MemoryTest.RunAsync(args).GetAwaiter().GetResult();
         if (args.Contains("--self-test")) return SelfTest.RunAsync(args).GetAwaiter().GetResult();
         if (args.Contains("--register-startup"))
@@ -41,16 +88,31 @@ internal static class Program
                 pipe.Connect(3000); using var writer = new StreamWriter(pipe) { AutoFlush = true };
                 writer.WriteLine(args.Contains("--quit") ? "quit" : args.Contains("--pause") ? "pause" : "show");
             }
-            catch { MessageBox.Show("Lazy Type is already running. Open it from the system tray.", "Lazy Type"); }
+            catch
+            {
+                MessageBox.Show("Lazy Type is already running. Open it from the system tray.", "Lazy Type");
+            }
             return 0;
         }
         if (args.Contains("--quit") || args.Contains("--pause")) return 0;
         var fixtureIndex = Array.IndexOf(args, "--test-audio");
         var fixture = fixtureIndex >= 0 && fixtureIndex + 1 < args.Length ? args[fixtureIndex + 1] : null;
         if (testSession && fixture == null) return 1;
-        try { using var app = new TrayApp(!args.Contains("--background"), fixture, testSession); System.Windows.Forms.Application.Run(app); }
-        catch (Exception e) { AppLog.Write("Startup failed: " + e); MessageBox.Show(e.Message, "Lazy Type could not start", MessageBoxButtons.OK, MessageBoxIcon.Error); return 1; }
-        finally { singleton.ReleaseMutex(); }
+        try
+        {
+            using var app = new TrayApp(!args.Contains("--background"), fixture, testSession);
+            System.Windows.Forms.Application.Run(app);
+        }
+        catch (Exception e)
+        {
+            AppLog.Write("Startup failed: " + e);
+            MessageBox.Show(e.Message, "Lazy Type could not start", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            return 1;
+        }
+        finally
+        {
+            try { singleton.ReleaseMutex(); } catch { }
+        }
         return 0;
     }
 }

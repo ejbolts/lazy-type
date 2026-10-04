@@ -7,8 +7,12 @@ internal sealed class TrayApp : ApplicationContext
 {
     private readonly MainForm form = new();
     private readonly RecordingOverlay overlay = new();
+    private readonly SuggestionBadge suggestionBadge = new();
+    private SuggestionForm? suggestionForm;
+    private TextTarget? suggestionTarget;
     private readonly EngineHost engines = new();
-    private readonly AppSettings settings = AppSettings.Load();
+    private readonly AppSettings settings;
+    private readonly bool testSession;
     private readonly ThemeController themes;
     private readonly NotifyIcon tray = new();
     private readonly CancellationTokenSource shutdown = new();
@@ -16,33 +20,48 @@ internal sealed class TrayApp : ApplicationContext
     private CancellationTokenSource? operation;
     private Microphone? mic;
     private TextTarget? target;
-    private bool recording, processing, paused, closing, rawMode;
+    private bool recording, processing, paused, closing, rawMode, suggesting;
     private int generation;
     private readonly List<(int Id, string Name)> devices;
     private readonly byte[]? testAudio;
-    public TrayApp(bool show, string? testAudioPath = null)
+
+    public TrayApp(bool show, string? testAudioPath = null, bool testSession = false)
     {
+        this.testSession = testSession;
+        settings = testSession ? new AppSettings { Hotkey = "F8" } : AppSettings.Load();
         if (testAudioPath != null)
         {
             using var test = new WaveFileReader(testAudioPath);
             if (test.WaveFormat.SampleRate != 16000 || test.WaveFormat.BitsPerSample != 16 || test.WaveFormat.Channels != 1 || test.TotalTime > TimeSpan.FromMinutes(2))
                 throw new ArgumentException("Test audio must be a mono 16 kHz, 16-bit WAV under two minutes.");
             testAudio = File.ReadAllBytes(testAudioPath);
-            form.Text = "Lazy Type · Test audio";
+            form.Text = testSession ? "Lazy Type · Isolated test" : "Lazy Type · Test audio";
         }
         _ = form.Handle;
-        themes = new ThemeController(form, overlay, settings, settings.Save);
+        themes = new ThemeController(form, overlay, settings, SaveSettings);
         devices = Microphone.Devices();
         foreach (var item in devices) form.Mic.Items.Add(item.Name);
         form.Mic.SelectedIndex = Math.Max(0, devices.FindIndex(d => d.Id == settings.Microphone));
         settings.Microphone = devices[form.Mic.SelectedIndex].Id;
-        form.Clean.Checked = settings.Cleanup; form.Startup.Checked = AppSettings.Startup;
+        form.Clean.Checked = settings.Cleanup;
+        form.Startup.Checked = !testSession && AppSettings.Startup;
+        form.Startup.Enabled = !testSession;
+        form.Suggestions.Checked = settings.Suggestions;
         form.HotkeyChoice.SelectedItem = settings.Hotkey;
         if (form.HotkeyChoice.SelectedIndex < 0) form.HotkeyChoice.SelectedIndex = 0;
-        form.Mic.SelectedIndexChanged += (_, _) => { settings.Microphone = devices[form.Mic.SelectedIndex].Id; settings.Save(); };
-        form.Clean.CheckedChanged += (_, _) => { settings.Cleanup = form.Clean.Checked; settings.Save(); };
+        form.Mic.SelectedIndexChanged += (_, _) => { settings.Microphone = devices[form.Mic.SelectedIndex].Id; SaveSettings(); };
+        form.Clean.CheckedChanged += (_, _) => { settings.Cleanup = form.Clean.Checked; SaveSettings(); };
+        form.Suggestions.CheckedChanged += (_, _) =>
+        {
+            settings.Suggestions = form.Suggestions.Checked; SaveSettings();
+            if (!settings.Suggestions) CloseSuggestion();
+        };
+        form.SuggestionRequested += () => _ = SuggestAsync(null);
+        form.Result.TextChanged += (_, _) => CloseSuggestion();
+        suggestionBadge.Requested += () => _ = SuggestAsync(suggestionTarget);
         form.Startup.CheckedChanged += (_, _) => { try { AppSettings.Startup = form.Startup.Checked; } catch (Exception e) { Report(e); } };
-        form.HotkeyChoice.SelectedIndexChanged += (_, _) => { settings.Hotkey = form.HotkeyChoice.SelectedItem!.ToString()!; settings.Save(); RegisterHotkeys(); };
+        form.HotkeyChoice.SelectedIndexChanged += (_, _) => { settings.Hotkey = form.HotkeyChoice.SelectedItem!.ToString()!; SaveSettings(); RegisterHotkeys(); };
+        form.HotkeyChoice.Enabled = !testSession;
         form.HotkeyPressed += id =>
         {
             if (id == 3) Cancel();
@@ -61,14 +80,17 @@ internal sealed class TrayApp : ApplicationContext
         RegisterHotkeys();
         Status("Ready · models unloaded", "Microphone off · Models load only when you start dictating");
         if (show) form.ShowWindow();
-        _ = ListenAsync();
+        if (!testSession) _ = ListenAsync();
     }
+
+    private void SaveSettings() { if (!testSession) settings.Save(); }
     private void UI(Action action) { if (!closing && !form.IsDisposed) try { if (form.InvokeRequired) form.BeginInvoke(action); else action(); } catch { } }
     private void Status(string title, string explanation)
     {
         form.SetStatus(title, explanation, paused);
         tray.Text = "Lazy Type · " + (recording ? "Microphone on" : paused ? "Paused" : "Microphone off");
     }
+
     private void RegisterHotkeys()
     {
         foreach (var id in new[] { 1, 2, 4 }) Native.UnregisterHotKey(form.Handle, id);
@@ -78,7 +100,7 @@ internal sealed class TrayApp : ApplicationContext
         var alternate = settings.Hotkey == "Ctrl+Shift+Space" ? 7u : modifiers | 4u;
         var first = Native.RegisterHotKey(form.Handle, 1, modifiers | 0x4000, key);
         var second = Native.RegisterHotKey(form.Handle, 2, alternate | 0x4000, key);
-        var pauseKey = Native.RegisterHotKey(form.Handle, 4, 7 | 0x4000, 0x50);
+        var pauseKey = testSession || Native.RegisterHotKey(form.Handle, 4, 7 | 0x4000, 0x50);
         form.SetShortcut(settings.Hotkey);
         if (!first || !second)
         {
@@ -87,11 +109,13 @@ internal sealed class TrayApp : ApplicationContext
         }
         if (!pauseKey) AppLog.Write("Optional pause shortcut unavailable; use the pause button.");
     }
+
     private void EscapeEnabled(bool enabled)
     {
         Native.UnregisterHotKey(form.Handle, 3);
         if (enabled) Native.RegisterHotKey(form.Handle, 3, 0x4000, 0x1B);
     }
+
     private async Task WarmAsync()
     {
         var token = lifetime.Token;
@@ -102,17 +126,20 @@ internal sealed class TrayApp : ApplicationContext
         // Recording continues if preload fails; processing will retry and report errors.
         catch (Exception) { if (!token.IsCancellationRequested) AppLog.Write("Background model load failed; will retry after recording."); }
     }
+
     private void ReleaseModels()
     {
         var previous = lifetime;
         previous.Cancel(); engines.Stop();
         lifetime = new(); previous.Dispose();
     }
+
     private async Task ToggleAsync(bool raw)
     {
         if (closing) return;
         if (recording) { await FinishRecordingAsync(); return; }
         if (processing) return;
+        CloseSuggestion();
         try
         {
             if (paused) Resume();
@@ -126,13 +153,15 @@ internal sealed class TrayApp : ApplicationContext
                 next.Start();
             }
             recording = true;
+            form.SetSuggestionBusy(true);
             EscapeEnabled(true);
             overlay.Present(testAudio != null ? "Test audio" : rawMode ? "Listening · raw" : "Listening", true);
             Status(testAudio == null ? "Listening" : "Test recording", testAudio == null ? "Microphone on · Press the same hotkey again to stop · 2 minute limit" : "Test fixture selected · Microphone off · Press the same hotkey to process");
             _ = WarmAsync();
         }
-        catch (Exception e) { mic?.Dispose(); mic = null; recording = false; EscapeEnabled(false); overlay.Dismiss(); ReleaseModels(); Report(e); }
+        catch (Exception e) { mic?.Dispose(); mic = null; recording = false; form.SetSuggestionBusy(false); EscapeEnabled(false); overlay.Dismiss(); ReleaseModels(); Report(e); }
     }
+
     private async Task FinishRecordingAsync()
     {
         var currentMic = mic;
@@ -157,9 +186,10 @@ internal sealed class TrayApp : ApplicationContext
         {
             if (operation == currentOperation) operation = null;
             currentMic?.Dispose(); if (mic == currentMic) mic = null;
-            if (currentGeneration == generation) { ReleaseModels(); processing = false; overlay.Dismiss(); EscapeEnabled(false); }
+            if (currentGeneration == generation) { ReleaseModels(); processing = false; form.SetSuggestionBusy(paused); overlay.Dismiss(); EscapeEnabled(false); }
         }
     }
+
     private async Task ProcessAudioAsync(byte[] wav, bool raw, TextTarget? destination, CancellationToken ct)
     {
         overlay.Present(engines.Ready ? "Transcribing…" : "Loading local models…");
@@ -183,6 +213,12 @@ internal sealed class TrayApp : ApplicationContext
         overlay.Dismiss();
         var inserted = destination != null && await destination.InsertAsync(result, ct);
         ct.ThrowIfCancellationRequested();
+        if (inserted && settings.Suggestions && destination != null)
+        {
+            destination.RememberInsertion(result);
+            suggestionTarget = destination;
+            suggestionBadge.Present(destination);
+        }
         var seconds = timer.Elapsed.TotalSeconds;
         AppLog.Write($"Dictation complete: {seconds:F1}s; inserted={inserted}; raw={raw}; fallback={fallback}.");
         if (!inserted && destination != null)
@@ -192,13 +228,16 @@ internal sealed class TrayApp : ApplicationContext
         }
         else Status("Ready · models unloaded", fallback ? "Cleanup was unavailable. Your original text was kept." : $"Microphone off · Last dictation processed in {seconds:F1}s · All processing stayed on this PC");
     }
+
     private async Task ImportAsync()
     {
         if (recording || processing) return;
         using var dialog = new OpenFileDialog { Filter = "WAV audio (*.wav)|*.wav", Title = "Test local transcription with a WAV recording" };
         if (dialog.ShowDialog(form) != DialogResult.OK) return;
+        CloseSuggestion();
         if (paused) Resume();
         processing = true; var id = ++generation;
+        form.SetSuggestionBusy(true);
         using var currentOperation = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);
         operation = currentOperation; var ct = currentOperation.Token;
         EscapeEnabled(true);
@@ -216,34 +255,143 @@ internal sealed class TrayApp : ApplicationContext
         finally
         {
             if (operation == currentOperation) operation = null;
-            if (id == generation) { ReleaseModels(); processing = false; overlay.Dismiss(); EscapeEnabled(false); }
+            if (id == generation) { ReleaseModels(); processing = false; form.SetSuggestionBusy(paused); overlay.Dismiss(); EscapeEnabled(false); }
         }
     }
+
+    private void CloseSuggestion()
+    {
+        suggestionBadge.Dismiss(); suggestionTarget = null;
+        suggestionForm?.Close();
+    }
+
+    private async Task SuggestAsync(TextTarget? destination)
+    {
+        if (!settings.Suggestions || recording || processing || paused || closing || string.IsNullOrWhiteSpace(form.Result.Text)) return;
+        var source = form.Result.Text;
+        CloseSuggestion();
+        var preview = new SuggestionForm(source, destination != null);
+        suggestionForm = preview;
+        var anchor = destination != null && destination.TryGetBounds(out var field) ? field : form.Bounds;
+        void PositionPreview()
+        {
+            var area = Screen.FromRectangle(anchor).WorkingArea;
+            var x = destination == null ? anchor.Left + (anchor.Width - preview.Width) / 2 : anchor.Right - preview.Width;
+            var y = destination == null ? anchor.Top + (anchor.Height - preview.Height) / 2 : anchor.Bottom + 8;
+            if (destination != null && y + preview.Height > area.Bottom) y = anchor.Top - preview.Height - 8;
+            preview.Location = new Point(Math.Clamp(x, area.Left, Math.Max(area.Left, area.Right - preview.Width)),
+                Math.Clamp(y, area.Top, Math.Max(area.Top, area.Bottom - preview.Height)));
+        }
+        PositionPreview();
+        preview.Shown += (_, _) => PositionPreview();
+        preview.FormClosed += (_, _) =>
+        {
+            if (suggestionForm != preview) return;
+            suggestionForm = null;
+            if (suggesting) Cancel();
+        };
+        preview.ApplyRequested += () => _ = ApplySuggestionAsync(preview, source, destination);
+        preview.Show();
+        processing = true; suggesting = true; form.SetSuggestionBusy(true); EscapeEnabled(true);
+        var id = ++generation;
+        using var currentOperation = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);
+        operation = currentOperation; var ct = currentOperation.Token;
+        Status("Suggesting clearer wording", "Microphone off · Qwen is editing locally · Esc cancels");
+        try
+        {
+            if (source.Length > 6000) throw new InvalidOperationException("Suggestions support up to 6,000 characters. Shorten the result and try again.");
+            await engines.EnsureTextReadyAsync(ct);
+            var text = await engines.SuggestAsync(source, ct);
+            ct.ThrowIfCancellationRequested();
+            if (suggestionForm == preview && form.Result.Text == source)
+                preview.ShowSuggestion(text, text != source, destination == null || destination.CanReplaceInsertion());
+            Status("Suggestion ready · models unloaded", "Review the suggestion before applying. Your original transcript is still available.");
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception e)
+        {
+            if (!ct.IsCancellationRequested && suggestionForm == preview)
+            {
+                preview.ShowFailure("Suggestion unavailable. Your text is unchanged. Close and try again.");
+                Status("Suggestion unavailable · models unloaded", e.Message);
+                AppLog.Write("Suggestion failed: " + e.GetType().Name);
+            }
+        }
+        finally
+        {
+            if (operation == currentOperation) operation = null;
+            if (id == generation) { ReleaseModels(); processing = false; suggesting = false; form.SetSuggestionBusy(paused); EscapeEnabled(false); }
+        }
+    }
+
+    private async Task ApplySuggestionAsync(SuggestionForm preview, string source, TextTarget? destination)
+    {
+        if (processing || suggestionForm != preview || form.Result.Text != source || !settings.Suggestions) return;
+        var text = preview.SuggestedText;
+        if (string.IsNullOrWhiteSpace(text)) return;
+        if (destination == null)
+        {
+            CloseSuggestion(); form.Result.Text = text;
+            Status("Suggestion applied", "The last result has been updated. Your original transcript is still available.");
+            return;
+        }
+        processing = true; suggesting = true; form.SetSuggestionBusy(true); preview.SetApplying();
+        var id = ++generation;
+        using var currentOperation = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);
+        operation = currentOperation; var ct = currentOperation.Token;
+        try
+        {
+            if (await destination.ReplaceInsertionAsync(text, ct))
+            {
+                ct.ThrowIfCancellationRequested();
+                suggesting = false; CloseSuggestion(); form.Result.Text = text;
+                Status("Suggestion applied", "Only the dictated text was replaced. Your original transcript is still available.");
+            }
+            else if (!preview.IsDisposed)
+            {
+                preview.ShowFailure("The field changed or replacement was blocked. Copy the suggestion to use it.");
+                preview.Activate();
+            }
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception) { if (!preview.IsDisposed) preview.ShowFailure("Couldn't replace the text. Copy the suggestion to use it."); }
+        finally
+        {
+            if (operation == currentOperation) operation = null;
+            if (id == generation) { processing = false; suggesting = false; form.SetSuggestionBusy(paused); }
+        }
+    }
+
     private void Cancel()
     {
         ++generation; operation?.Cancel();
         mic?.Dispose(); mic = null;
         ReleaseModels();
-        recording = false; processing = false; overlay.Dismiss(); EscapeEnabled(false);
+        recording = false; processing = false; suggesting = false; CloseSuggestion(); form.SetSuggestionBusy(paused); overlay.Dismiss(); EscapeEnabled(false);
         Status(paused ? "Paused · models unloaded" : "Cancelled · models unloaded", "Microphone off · No new text will be inserted.");
     }
+
     private void TogglePause() { if (paused) Resume(); else Pause("Microphone off · GPU and model memory released. Resume when you are ready."); }
     private void Pause(string reason)
     {
         paused = true; Cancel();
         Status("Paused · models unloaded", reason); AppLog.Write("Paused; model workers terminated.");
     }
+
     private void Resume()
     {
         paused = false;
+        form.SetSuggestionBusy(false);
         Status("Ready · models unloaded", "Microphone off · Models load when you start dictating");
     }
+
     private void Report(Exception e)
     {
         AppLog.Write("Operation failed: " + e.GetType().Name);
         Status("Needs attention", e.Message);
         tray.ShowBalloonTip(5000, "Lazy Type", e.Message, ToolTipIcon.Warning);
     }
+
     private async Task ListenAsync()
     {
         while (!shutdown.IsCancellationRequested)
@@ -260,10 +408,12 @@ internal sealed class TrayApp : ApplicationContext
             catch { await Task.Delay(300); }
         }
     }
+
     private void Quit()
     {
         if (closing) return;
         closing = true; shutdown.Cancel(); operation?.Cancel(); lifetime.Cancel();
+        suggesting = false; suggestionForm?.Close(); suggestionBadge.Dispose();
         mic?.Dispose(); themes.Dispose(); overlay.Dispose(); engines.Dispose();
         for (var id = 1; id <= 4; id++) Native.UnregisterHotKey(form.Handle, id);
         tray.Visible = false; tray.Icon?.Dispose(); tray.Dispose(); form.Quitting = true; form.Close(); form.Dispose();

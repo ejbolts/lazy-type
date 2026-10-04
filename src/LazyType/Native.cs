@@ -1,20 +1,40 @@
 using System.Runtime.InteropServices;
 using System.Windows.Automation;
+using System.Windows.Automation.Text;
 
 namespace LazyType;
 
 internal static class Native
 {
     public const int WM_HOTKEY = 0x0312;
+    public const int WH_MOUSE_LL = 14;
+    public const int WM_MOUSEMOVE = 0x0200;
+    public const uint SWP_NOSIZE = 0x0001;
+    public const uint SWP_NOZORDER = 0x0004;
+    public const uint SWP_NOACTIVATE = 0x0010;
+    public const uint SWP_ASYNCWINDOWPOS = 0x4000;
+
     [DllImport("dwmapi.dll")] public static extern int DwmSetWindowAttribute(IntPtr hwnd, int attribute, ref int value, int size);
     [DllImport("user32.dll", SetLastError = true)] public static extern bool RegisterHotKey(IntPtr hwnd, int id, uint modifiers, uint key);
     [DllImport("user32.dll")] public static extern bool UnregisterHotKey(IntPtr hwnd, int id);
     [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hwnd);
     [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint processId);
     [DllImport("user32.dll")] public static extern short GetAsyncKeyState(int key);
     [DllImport("user32.dll")] public static extern uint GetClipboardSequenceNumber();
     [DllImport("user32.dll")] private static extern uint SendInput(uint count, INPUT[] inputs, int size);
     [DllImport("user32.dll")] public static extern bool DestroyIcon(IntPtr handle);
+    [DllImport("user32.dll", SetLastError = true)] public static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
+    [DllImport("winmm.dll", EntryPoint = "timeBeginPeriod")] public static extern uint TimeBeginPeriod(uint uMilliseconds);
+    [DllImport("winmm.dll", EntryPoint = "timeEndPeriod")] public static extern uint TimeEndPeriod(uint uMilliseconds);
+    public delegate IntPtr HookProc(int nCode, IntPtr wParam, IntPtr lParam);
+    [DllImport("user32.dll", SetLastError = true)] public static extern IntPtr SetWindowsHookEx(int idHook, HookProc lpfn, IntPtr hMod, uint dwThreadId);
+    [DllImport("user32.dll", SetLastError = true)] public static extern bool UnhookWindowsHookEx(IntPtr hhk);
+    [DllImport("user32.dll")] public static extern IntPtr CallNextHookEx(IntPtr hhk, int nCode, IntPtr wParam, IntPtr lParam);
+    [DllImport("kernel32.dll", CharSet = CharSet.Auto, SetLastError = true)] public static extern IntPtr GetModuleHandle(string? lpModuleName);
+    [StructLayout(LayoutKind.Sequential)] public struct POINT { public int X, Y; }
+    [StructLayout(LayoutKind.Sequential)] public struct MSLLHOOKSTRUCT { public POINT pt; public uint mouseData, flags, time; public UIntPtr extra; }
+
     [StructLayout(LayoutKind.Sequential)] private struct INPUT { public uint type; public INPUTUNION u; }
     [StructLayout(LayoutKind.Explicit)] private struct INPUTUNION
     {
@@ -55,6 +75,7 @@ internal sealed class TextTarget
     private AutomationElement? element;
     private int[]? runtimeId;
     private bool protectedField;
+    private string? insertedText, documentSnapshot;
     public static TextTarget Capture()
     {
         var target = new TextTarget { Window = Native.GetForegroundWindow() };
@@ -81,7 +102,80 @@ internal sealed class TextTarget
         catch { return false; }
         return true;
     }
-    public async Task<bool> InsertAsync(string text, CancellationToken ct)
+    public bool TryGetBounds(out Rectangle bounds)
+    {
+        bounds = Rectangle.Empty;
+        try
+        {
+            if (protectedField || element == null || element.Current.IsOffscreen) return false;
+            var rect = element.Current.BoundingRectangle;
+            if (rect.IsEmpty || rect.Width < 20 || rect.Height < 12) return false;
+            bounds = Rectangle.FromLTRB((int)rect.Left, (int)rect.Top, (int)rect.Right, (int)rect.Bottom);
+            return true;
+        }
+        catch { return false; }
+    }
+    private TextPattern? TextPattern()
+    {
+        if (protectedField || element == null || element.Current.IsPassword) return null;
+        return element.TryGetCurrentPattern(System.Windows.Automation.TextPattern.Pattern, out var pattern) ? (TextPattern)pattern : null;
+    }
+    // Never replace a whole field: retain a unique range for just the inserted dictation.
+    // Unsupported editors still offer a copyable preview.
+    public void RememberInsertion(string text)
+    {
+        insertedText = null; documentSnapshot = null;
+        try
+        {
+            var pattern = TextPattern();
+            var document = pattern?.DocumentRange.GetText(32001);
+            if (document == null || document.Length > 32000 || !HasUniqueText(document, text)) return;
+            insertedText = text; documentSnapshot = document;
+        }
+        catch { }
+    }
+    internal static bool HasUniqueText(string document, string text)
+    {
+        if (string.IsNullOrEmpty(text)) return false;
+        var index = document.IndexOf(text, StringComparison.Ordinal);
+        return index >= 0 && document.IndexOf(text, index + 1, StringComparison.Ordinal) < 0;
+    }
+    public bool CanReplaceInsertion()
+    {
+        try { return insertedText != null && documentSnapshot != null && TextPattern()?.DocumentRange.GetText(32001) == documentSnapshot; }
+        catch { return false; }
+    }
+    public async Task<bool> ReplaceInsertionAsync(string text, CancellationToken ct)
+    {
+        if (!CanReplaceInsertion()) return false;
+        for (var i = 0; i < 40 && Native.ModifiersDown; i++) await Task.Delay(25, ct);
+        ct.ThrowIfCancellationRequested();
+        try
+        {
+            if (Native.ModifiersDown || !Native.SetForegroundWindow(Window)) return false;
+            element!.SetFocus();
+            if (!IsCurrent() || !CanReplaceInsertion()) return false;
+            var pattern = TextPattern()!;
+            var range = pattern.DocumentRange.FindText(insertedText!, false, false);
+            if (range == null || range.GetText(-1) != insertedText) return false;
+            range.Select();
+            bool SelectionUnchanged()
+            {
+                try
+                {
+                    var selected = pattern.GetSelection();
+                    return CanReplaceInsertion() && selected.Length == 1
+                        && selected[0].CompareEndpoints(TextPatternRangeEndpoint.Start, range, TextPatternRangeEndpoint.Start) == 0
+                        && selected[0].CompareEndpoints(TextPatternRangeEndpoint.End, range, TextPatternRangeEndpoint.End) == 0;
+                }
+                catch { return false; }
+            }
+            return await InsertAsync(text, ct, SelectionUnchanged);
+        }
+        catch (OperationCanceledException) { throw; }
+        catch { return false; }
+    }
+    public async Task<bool> InsertAsync(string text, CancellationToken ct, Func<bool>? validateSelection = null)
     {
         for (var i = 0; i < 40 && Native.ModifiersDown; i++) await Task.Delay(25, ct);
         ct.ThrowIfCancellationRequested();
@@ -95,7 +189,7 @@ internal sealed class TextTarget
             Clipboard.SetText(text);
             ownedSequence = Native.GetClipboardSequenceNumber();
             ct.ThrowIfCancellationRequested();
-            if (!IsCurrent()) return false;
+            if (!IsCurrent() || validateSelection?.Invoke() == false) return false;
             Native.Paste();
             // Keep clipboard available long enough for rich editors to consume it.
             await Task.Delay(1200);

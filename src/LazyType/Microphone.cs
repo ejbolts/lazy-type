@@ -12,11 +12,11 @@ internal sealed class Microphone : IDisposable
     private bool ended;
     private bool disposed;
     public float Level { get; private set; }
-    public bool HasSpeech => loudSamples >= 1600;
+    public bool HasSpeech => loudSamples >= 800;
     public event Action? LimitReached;
     public Microphone(int device)
     {
-        source = new WaveInEvent { DeviceNumber = device, WaveFormat = new WaveFormat(16000, 16, 1), BufferMilliseconds = 50 };
+        source = new WaveInEvent { DeviceNumber = device, WaveFormat = new WaveFormat(16000, 16, 1), BufferMilliseconds = 25 };
         source.DataAvailable += (_, e) =>
         {
             var reachedLimit = false;
@@ -28,9 +28,11 @@ internal sealed class Microphone : IDisposable
                 {
                     var value = BitConverter.ToInt16(e.Buffer, i) / 32768f;
                     sum += value * value;
-                    if (Math.Abs(value) > 0.008) Interlocked.Increment(ref loudSamples);
+                    if (Math.Abs(value) > 0.003) Interlocked.Increment(ref loudSamples);
                 }
-                Level = Math.Min(1f, (float)Math.Sqrt(sum / Math.Max(1, e.BytesRecorded / 2)) * 8);
+                var rms = (float)Math.Sqrt(sum / Math.Max(1, e.BytesRecorded / 2));
+                var active = Math.Max(0f, rms - 0.0006f);
+                Level = Math.Clamp((float)Math.Pow(active * 36f, 0.58), 0f, 1f);
                 buffer.Write(e.Buffer, 0, e.BytesRecorded);
                 if (buffer.Length >= 16000 * 2 * 120) { ended = true; reachedLimit = true; }
             }

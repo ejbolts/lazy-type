@@ -8,6 +8,7 @@
     <ImplicitUsings>disable</ImplicitUsings>
     <AssemblyName>LazyType</AssemblyName>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>Assets\LazyType.ico</ApplicationIcon>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="NAudio" Version="2.2.1" />

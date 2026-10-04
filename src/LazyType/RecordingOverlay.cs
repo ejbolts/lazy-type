@@ -11,6 +11,7 @@ internal sealed class RecordingOverlay : Form
     private string message = "Listening";
     private string hint = "Hotkey stops · Esc cancels";
     private bool recording;
+    private bool dark = true;
     private float smoothLevel;
     private Point? lastCursor;
     public Func<float>? AudioLevel { get; set; }
@@ -31,6 +32,13 @@ internal sealed class RecordingOverlay : Form
         };
     }
     protected override bool ShowWithoutActivation => true;
+    public void ApplyTheme(bool isDark)
+    {
+        dark = isDark;
+        BackColor = dark ? Color.FromArgb(28, 28, 28) : Color.FromArgb(248, 249, 252);
+        ForeColor = dark ? Color.FromArgb(247, 247, 247) : Color.FromArgb(28, 34, 45);
+        Invalidate();
+    }
     protected override CreateParams CreateParams
     {
         get { var cp = base.CreateParams; cp.ExStyle |= 0x08000000 | 0x80 | 0x20; return cp; }
@@ -49,6 +57,11 @@ internal sealed class RecordingOverlay : Form
         timer.Start(); Invalidate();
     }
     public void Dismiss() { timer.Stop(); Hide(); elapsed.Stop(); }
+    public void PresentPreview()
+    {
+        Present("Popup preview");
+        hint = "Preview · Microphone off";
+    }
     private void FollowCursor()
     {
         var mouse = Cursor.Position;
@@ -89,14 +102,14 @@ internal sealed class RecordingOverlay : Form
         var width = ClientSize.Width / scale; var height = ClientSize.Height / scale;
         var bounds = new RectangleF(.5f, .5f, width - 1, height - 1);
         using var outline = RoundedRect(bounds, 12);
-        using var glass = new LinearGradientBrush(bounds, Color.FromArgb(48, 48, 48), Color.FromArgb(19, 19, 19), LinearGradientMode.Vertical);
+        using var glass = new LinearGradientBrush(bounds, dark ? Color.FromArgb(48, 48, 48) : Color.White, dark ? Color.FromArgb(19, 19, 19) : Color.FromArgb(228, 233, 241), LinearGradientMode.Vertical);
         g.FillPath(glass, outline);
         using var border = new Pen(Color.FromArgb(110, 0, 0, 0), 1);
         g.DrawPath(border, outline);
         using var innerEdge = RoundedRect(new RectangleF(1.5f, 1.5f, width - 3, height - 3), 11);
         using var highlight = new Pen(Color.FromArgb(48, 255, 255, 255), 1);
         g.DrawPath(highlight, innerEdge);
-        using var accent = new SolidBrush(recording ? Color.FromArgb(92, 220, 157) : Color.FromArgb(195, 195, 195));
+        using var accent = new SolidBrush(recording ? (dark ? Color.FromArgb(92, 220, 157) : Color.FromArgb(18, 112, 73)) : (dark ? Color.FromArgb(195, 195, 195) : Color.FromArgb(82, 93, 111)));
         if (recording)
         {
             for (var i = 0; i < 5; i++)
@@ -109,7 +122,7 @@ internal sealed class RecordingOverlay : Form
         using var textFormat = new StringFormat { Trimming = StringTrimming.EllipsisCharacter, FormatFlags = StringFormatFlags.NoWrap };
         using var ink = new SolidBrush(ForeColor);
         g.DrawString(message, titleFont, ink, new RectangleF(43, 13, width - (recording ? 94 : 54), 20), textFormat);
-        using var muted = new SolidBrush(Color.FromArgb(210, 210, 210));
+        using var muted = new SolidBrush(dark ? Color.FromArgb(210, 210, 210) : Color.FromArgb(64, 76, 95));
         g.DrawString(hint, hintFont, muted, 13, 39);
         if (recording) g.DrawString(elapsed.Elapsed.ToString(@"mm\:ss"), hintFont, muted, width - 46, 14);
         base.OnPaint(e);

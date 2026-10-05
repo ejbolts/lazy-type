@@ -154,10 +154,19 @@ internal sealed class TextTarget
         {
             var pattern = TextPattern();
             var document = pattern?.DocumentRange.GetText(32001);
-            if (document == null || document.Length > 32000 || !HasUniqueText(document, text)) return;
+            // Reasons only; dictated text is never logged.
+            if (document == null) { AppLog.Write("Suggestion marks unavailable: the field does not expose its text."); return; }
+            if (document.Length > 32000) { AppLog.Write("Suggestion marks unavailable: the field holds more than 32,000 characters."); return; }
+            if (!HasUniqueText(document, text))
+            {
+                AppLog.Write(document.Contains(text, StringComparison.Ordinal)
+                    ? "Suggestion marks unavailable: the dictation appears more than once in the field."
+                    : "Suggestion marks unavailable: the field reports the dictation differently from what was pasted.");
+                return;
+            }
             insertedText = text; documentSnapshot = document;
         }
-        catch { }
+        catch (Exception e) { AppLog.Write("Suggestion marks unavailable: " + e.GetType().Name); }
     }
     internal static bool HasUniqueText(string document, string text)
     {
@@ -171,14 +180,20 @@ internal sealed class TextTarget
         catch { return false; }
     }
     // True when both ends of the line hit-test to the field's window, so a marker never draws over another app.
-    // Click-through layered windows, such as the marker itself, are skipped by hit-testing.
-    public bool IsUncovered(Rectangle line)
+    // Click-through layered windows, such as the marker itself, are skipped by hit-testing; our own label
+    // window (ignore) can sit over the field and is treated as see-through.
+    public bool IsUncovered(Rectangle line, IntPtr ignore = default)
     {
         var y = line.Top + line.Height / 2;
         var inset = Math.Min(4, line.Width / 2);
-        return OwnsPoint(line.Left + inset, y) && OwnsPoint(line.Right - 1 - inset, y);
+        return OwnsPoint(line.Left + inset, y, ignore) && OwnsPoint(line.Right - 1 - inset, y, ignore);
     }
-    private bool OwnsPoint(int x, int y) => Window != IntPtr.Zero && Native.GetAncestor(Native.WindowFromPoint(new Native.POINT { X = x, Y = y }), 2 /* GA_ROOT */) == Window;
+    private bool OwnsPoint(int x, int y, IntPtr ignore)
+    {
+        if (Window == IntPtr.Zero) return false;
+        var root = Native.GetAncestor(Native.WindowFromPoint(new Native.POINT { X = x, Y = y }), 2 /* GA_ROOT */);
+        return root == Window || (ignore != IntPtr.Zero && root == ignore);
+    }
     // Screen bounds of each visible line of the dictation, clipped to the field. Empty once the field changes.
     public Rectangle[] InsertionLineBounds() => Bounds(null)?[0] ?? Array.Empty<Rectangle>();
     // Line bounds for each span of the dictation, in order. Null once the field changes; an entry is empty
@@ -234,12 +249,12 @@ internal sealed class TextTarget
         ct.ThrowIfCancellationRequested();
         try
         {
-            if (Native.ModifiersDown || !Native.SetForegroundWindow(Window)) return false;
+            if (Native.ModifiersDown || !Native.SetForegroundWindow(Window)) { AppLog.Write("Replacement refused: the field's window could not be brought forward."); return false; }
             element!.SetFocus();
-            if (!IsCurrent() || !CanReplaceInsertion()) return false;
+            if (!IsCurrent() || !CanReplaceInsertion()) { AppLog.Write("Replacement refused: the field lost focus or changed."); return false; }
             var pattern = TextPattern()!;
             var range = pattern.DocumentRange.FindText(insertedText!, false, false);
-            if (range == null || range.GetText(-1) != insertedText) return false;
+            if (range == null || range.GetText(-1) != insertedText) { AppLog.Write("Replacement refused: the dictation could not be found in the field."); return false; }
             range.Select();
             bool SelectionUnchanged()
             {
@@ -253,10 +268,12 @@ internal sealed class TextTarget
                 }
                 catch { return false; }
             }
-            return await InsertAsync(text, ct, SelectionUnchanged);
+            var inserted = await InsertAsync(text, ct, SelectionUnchanged);
+            if (!inserted) AppLog.Write("Replacement refused: the selection did not match the dictation or the field lost focus.");
+            return inserted;
         }
         catch (OperationCanceledException) { throw; }
-        catch { return false; }
+        catch (Exception e) { AppLog.Write("Replacement failed: " + e.GetType().Name); return false; }
     }
     public async Task<bool> InsertAsync(string text, CancellationToken ct, Func<bool>? validateSelection = null)
     {

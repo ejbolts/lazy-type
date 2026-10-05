@@ -7,10 +7,16 @@ internal sealed class TrayApp : ApplicationContext
 {
     private readonly MainForm form = new();
     private readonly RecordingOverlay overlay = new();
-    private readonly SuggestionBadge suggestionBadge = new();
     private readonly TextHighlight highlight = new();
     private SuggestionForm? suggestionForm;
-    private TextTarget? suggestionTarget;
+    // The open suggestion: the field it marks, the wording it was compared against, and that comparison.
+    private TextTarget? suggestionDestination;
+    private string? suggestionSource;
+    private IReadOnlyList<DiffPart>? suggestionParts;
+    private IReadOnlyList<ChangeMark>? suggestionMarks;
+    private bool updatingResult;
+    // The field to check automatically once the dictation that was inserted into it has finished.
+    private TextTarget? pendingSuggestion;
     private readonly EngineHost engines = new();
     private readonly AppSettings settings;
     private readonly bool testSession;
@@ -58,8 +64,8 @@ internal sealed class TrayApp : ApplicationContext
             if (!settings.Suggestions) CloseSuggestion();
         };
         form.SuggestionRequested += () => _ = SuggestAsync(null);
-        form.Result.TextChanged += (_, _) => CloseSuggestion();
-        suggestionBadge.Requested += () => _ = SuggestAsync(suggestionTarget);
+        form.Result.TextChanged += (_, _) => { if (!updatingResult) CloseSuggestion(); };
+        highlight.ChangeClicked += index => _ = ApplyChangeAsync(index);
         form.Startup.CheckedChanged += (_, _) => { try { AppSettings.Startup = form.Startup.Checked; } catch (Exception e) { Report(e); } };
         form.HotkeyChoice.SelectedIndexChanged += (_, _) => { settings.Hotkey = form.HotkeyChoice.SelectedItem!.ToString()!; SaveSettings(); RegisterHotkeys(); };
         form.HotkeyChoice.Enabled = !testSession;
@@ -187,7 +193,14 @@ internal sealed class TrayApp : ApplicationContext
         {
             if (operation == currentOperation) operation = null;
             currentMic?.Dispose(); if (mic == currentMic) mic = null;
-            if (currentGeneration == generation) { ReleaseModels(); processing = false; form.SetSuggestionBusy(paused); overlay.Dismiss(); EscapeEnabled(false); }
+            if (currentGeneration == generation)
+            {
+                var next = pendingSuggestion; pendingSuggestion = null;
+                processing = false; overlay.Dismiss(); EscapeEnabled(false);
+                // Keep the text model loaded and check the wording straight away; it is released afterwards.
+                if (next != null && !ct.IsCancellationRequested && !closing && !paused) _ = SuggestAsync(next, automatic: true);
+                else { ReleaseModels(); form.SetSuggestionBusy(paused); }
+            }
         }
     }
 
@@ -215,16 +228,17 @@ internal sealed class TrayApp : ApplicationContext
         }
         ct.ThrowIfCancellationRequested(); form.Result.Text = result;
         Native.SetClipboardText(result);
-        // Inference is finished; release GPU allocations before clipboard insertion.
-        engines.Stop();
+        // Inference is finished; release GPU allocations before clipboard insertion, unless the text model is
+        // about to check the wording of this dictation.
+        var autoCheck = settings.Suggestions && destination != null && result.Length <= 6000;
+        if (!autoCheck) engines.Stop();
         overlay.Dismiss();
         var inserted = destination != null && await destination.InsertAsync(result, ct);
         ct.ThrowIfCancellationRequested();
         if (inserted && settings.Suggestions && destination != null)
         {
             destination.RememberInsertion(result);
-            suggestionTarget = destination;
-            suggestionBadge.Present(destination);
+            pendingSuggestion = destination;
         }
         var seconds = timer.Elapsed.TotalSeconds;
         AppLog.Write($"Dictation complete: {seconds:F1}s; inserted={inserted}; raw={raw}; fallback={fallback}.");
@@ -272,18 +286,23 @@ internal sealed class TrayApp : ApplicationContext
 
     private void CloseSuggestion()
     {
-        suggestionBadge.Dismiss(); suggestionTarget = null;
         highlight.Dismiss();
-        suggestionForm?.Close();
+        suggestionDestination = null; suggestionSource = null; suggestionParts = null; suggestionMarks = null;
+        var open = suggestionForm;
+        open?.Close();
+        // A preview that was never shown (an automatic check) gets no close event, so release it here.
+        if (open != null && suggestionForm == open && !open.Visible) { suggestionForm = null; open.Dispose(); }
     }
 
-    private async Task SuggestAsync(TextTarget? destination)
+    // automatic: run straight after dictation. The preview only appears, without taking focus, when there
+    // is something to change; otherwise it closes quietly.
+    private async Task SuggestAsync(TextTarget? destination, bool automatic = false)
     {
         if (!settings.Suggestions || recording || processing || paused || closing || string.IsNullOrWhiteSpace(form.Result.Text)) return;
         var source = form.Result.Text;
         CloseSuggestion();
         var popupDark = ThemeController.Resolve(settings.PopupTheme, ThemeController.Resolve(settings.Theme, ThemeController.IsSystemDark));
-        var preview = new SuggestionForm(source, destination != null, popupDark);
+        var preview = new SuggestionForm(source, destination != null, popupDark) { Passive = automatic };
         suggestionForm = preview;
         var anchor = destination != null && destination.TryGetBounds(out var field) ? field : form.Bounds;
         void PositionPreview()
@@ -301,12 +320,14 @@ internal sealed class TrayApp : ApplicationContext
         {
             if (suggestionForm != preview) return;
             suggestionForm = null;
-            if (suggesting) Cancel();
+            // Keep original or the close button: stop any check and clear the marks in the field.
+            if (suggesting) Cancel(); else CloseSuggestion();
         };
-        preview.ApplyRequested += () => _ = ApplySuggestionAsync(preview, source, destination);
+        suggestionDestination = destination;
+        preview.ApplyRequested += () => _ = ApplySuggestionAsync(preview, destination);
         // Mark the dictated text in the field first so the preview stays above the marker.
         if (destination != null) highlight.Present(destination);
-        preview.Show();
+        if (!automatic) preview.Show();
         processing = true; suggesting = true; form.SetSuggestionBusy(true); EscapeEnabled(true);
         var id = ++generation;
         using var currentOperation = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);
@@ -320,21 +341,28 @@ internal sealed class TrayApp : ApplicationContext
             ct.ThrowIfCancellationRequested();
             if (suggestionForm == preview && form.Result.Text == source)
             {
-                var parts = TextDiff.Compare(source, text);
-                var canApply = destination == null || destination.CanReplaceInsertion();
-                // Mark the edits in the field when the editor can locate them; otherwise show the full comparison.
-                var inline = destination != null && canApply
-                    && highlight.Settle(TextDiff.HasChanges(parts) ? TextDiff.Marks(source, parts) : Array.Empty<ChangeMark>());
-                if (!inline) highlight.Dismiss();
-                preview.ShowSuggestion(text, parts, canApply, inline);
+                if (automatic && !TextDiff.HasChanges(TextDiff.Compare(source, text)))
+                {
+                    suggesting = false; CloseSuggestion();
+                    Status("Ready · models unloaded", "Microphone off · Your wording already reads clearly, so nothing was marked.");
+                    return;
+                }
+                ShowSuggestion(preview, destination, source, text);
                 PositionPreview();
+                if (!preview.Visible) preview.Show();
             }
             Status("Suggestion ready · models unloaded", "Review the suggestion before applying. Your original transcript is still available.");
         }
         catch (OperationCanceledException) { }
         catch (Exception e)
         {
-            if (!ct.IsCancellationRequested && suggestionForm == preview)
+            if (!ct.IsCancellationRequested && suggestionForm == preview && automatic)
+            {
+                suggesting = false; CloseSuggestion();
+                Status("Suggestion unavailable · models unloaded", e.Message);
+                AppLog.Write("Automatic suggestion failed: " + e.GetType().Name);
+            }
+            else if (!ct.IsCancellationRequested && suggestionForm == preview)
             {
                 preview.ShowFailure("Suggestion unavailable. Your text is unchanged. Close and try again.");
                 highlight.Dismiss();
@@ -349,9 +377,73 @@ internal sealed class TrayApp : ApplicationContext
         }
     }
 
-    private async Task ApplySuggestionAsync(SuggestionForm preview, string source, TextTarget? destination)
+    // Compares the current wording with the suggestion and shows what is left to change.
+    private void ShowSuggestion(SuggestionForm preview, TextTarget? destination, string source, string text)
     {
-        if (processing || suggestionForm != preview || form.Result.Text != source || !settings.Suggestions) return;
+        var parts = TextDiff.Compare(source, text);
+        var marks = TextDiff.HasChanges(parts) ? TextDiff.Marks(source, parts) : new List<ChangeMark>();
+        var canApply = destination == null || destination.CanReplaceInsertion();
+        // Mark the edits in the field when the editor can locate them; otherwise show the full comparison.
+        var inline = destination != null && canApply && highlight.Settle(marks);
+        if (!inline) highlight.Dismiss();
+        if (destination != null && !inline && marks.Count > 0)
+            AppLog.Write(canApply ? "Suggestion marks unavailable: the editor could not locate every change." : "Suggestion marks unavailable: the field changed since dictation or cannot be replaced.");
+        suggestionSource = source; suggestionParts = parts; suggestionMarks = inline ? marks : null;
+        preview.ShowSuggestion(text, parts, canApply, inline);
+    }
+
+    // Applies one marked change by replacing the dictated range with the wording plus just that edit.
+    private async Task ApplyChangeAsync(int index)
+    {
+        var preview = suggestionForm; var destination = suggestionDestination; var source = suggestionSource;
+        var parts = suggestionParts; var marks = suggestionMarks;
+        if (processing || preview == null || destination == null || source == null || parts == null || marks == null
+            || index < 0 || index >= marks.Count || form.Result.Text != source || !settings.Suggestions) { highlight.Release(); return; }
+        var text = TextDiff.ApplyOne(parts, marks[index]);
+        var suggested = preview.SuggestedText;
+        processing = true; suggesting = true; form.SetSuggestionBusy(true);
+        var id = ++generation;
+        using var currentOperation = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);
+        operation = currentOperation; var ct = currentOperation.Token;
+        try
+        {
+            if (await destination.ReplaceInsertionAsync(text, ct))
+            {
+                ct.ThrowIfCancellationRequested();
+                destination.RememberInsertion(text);
+                updatingResult = true;
+                try { form.Result.Text = text; }
+                finally { updatingResult = false; }
+                if (TextDiff.HasChanges(TextDiff.Compare(text, suggested)))
+                {
+                    ShowSuggestion(preview, destination, text, suggested);
+                    Status("Change applied", "Only that part of your dictation was changed. Click another mark or apply the rest.");
+                }
+                else
+                {
+                    suggesting = false; CloseSuggestion();
+                    Status("Suggestion applied", "Every suggested change has been applied. Your original transcript is still available.");
+                }
+            }
+            else if (!preview.IsDisposed)
+            {
+                highlight.Release();
+                Status("Couldn't apply that change", "The field changed or replacement was blocked. Your text is unchanged.");
+            }
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception) { highlight.Release(); }
+        finally
+        {
+            if (operation == currentOperation) operation = null;
+            if (id == generation) { processing = false; suggesting = false; form.SetSuggestionBusy(paused); }
+        }
+    }
+
+    private async Task ApplySuggestionAsync(SuggestionForm preview, TextTarget? destination)
+    {
+        var source = suggestionSource;
+        if (processing || suggestionForm != preview || source == null || form.Result.Text != source || !settings.Suggestions) return;
         var text = preview.SuggestedText;
         if (string.IsNullOrWhiteSpace(text)) return;
         if (destination == null)
@@ -389,7 +481,7 @@ internal sealed class TrayApp : ApplicationContext
 
     private void Cancel()
     {
-        ++generation; operation?.Cancel();
+        ++generation; operation?.Cancel(); pendingSuggestion = null;
         mic?.Dispose(); mic = null;
         ReleaseModels();
         recording = false; processing = false; suggesting = false; CloseSuggestion(); form.SetSuggestionBusy(paused); overlay.Dismiss(); EscapeEnabled(false);
@@ -438,7 +530,7 @@ internal sealed class TrayApp : ApplicationContext
     {
         if (closing) return;
         closing = true; shutdown.Cancel(); operation?.Cancel(); lifetime.Cancel();
-        suggesting = false; suggestionForm?.Close(); suggestionBadge.Dispose(); highlight.Dispose();
+        suggesting = false; suggestionForm?.Close(); highlight.Dispose();
         mic?.Dispose(); themes.Dispose(); overlay.Dispose(); engines.Dispose();
         for (var id = 1; id <= 4; id++) Native.UnregisterHotKey(form.Handle, id);
         tray.Visible = false; tray.Icon?.Dispose(); tray.Dispose(); form.Quitting = true; form.Close(); form.Dispose();

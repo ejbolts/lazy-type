@@ -118,7 +118,7 @@ internal sealed class MainForm : Form
 
         // Setting 3: AI suggestions
         var suggestionsRow = CreateSettingRow(g => PolishIcon.Draw(g, new Rectangle(0, 0, 20, 20), Color.FromArgb(127, 86, 217)),
-            "AI suggestions", "Show a polish icon after dictation to refine wording", Suggestions);
+            "AI suggestions", "Check wording after dictation and mark suggested changes", Suggestions);
 
         // Setting 4: Start with Windows
         var startupRow = CreateSettingRow(g => VectorIcons.DrawWindowsLogo(g, new Rectangle(0, 0, 18, 18), GetIconColor()),

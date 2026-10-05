@@ -2,90 +2,6 @@ using System.Drawing.Drawing2D;
 
 namespace LazyType;
 
-internal sealed class SuggestionBadge : Form
-{
-    private readonly WandButton button = new();
-    private readonly System.Windows.Forms.Timer timer = new() { Interval = 250 };
-    private readonly ToolTip tips = new();
-    private TextTarget? target;
-    public event Action? Requested;
-
-    public SuggestionBadge()
-    {
-        FormBorderStyle = FormBorderStyle.None;
-        ShowInTaskbar = false;
-        StartPosition = FormStartPosition.Manual;
-        TopMost = true;
-        Size = new Size(34, 34);
-        BackColor = Color.Magenta;
-        TransparencyKey = Color.Magenta;
-
-        button.Dock = DockStyle.Fill;
-        button.Click += (_, _) => Requested?.Invoke();
-        tips.SetToolTip(button, "A little polish · Refine wording");
-        Controls.Add(button);
-
-        timer.Tick += (_, _) => UpdatePosition();
-    }
-
-    protected override CreateParams CreateParams
-    {
-        get
-        {
-            var cp = base.CreateParams;
-            cp.ExStyle |= 0x08000000 | 0x80; // WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW
-            return cp;
-        }
-    }
-
-    protected override void WndProc(ref Message m)
-    {
-        if (m.Msg == 0x21) { m.Result = (IntPtr)3; return; } // MA_NOACTIVATE
-        base.WndProc(ref m);
-    }
-
-    public void Present(TextTarget destination)
-    {
-        target = destination;
-        timer.Start();
-        UpdatePosition();
-    }
-
-    public void Dismiss()
-    {
-        timer.Stop();
-        target = null;
-        Hide();
-    }
-
-    private void UpdatePosition()
-    {
-        if (target == null || !target.IsCurrent() || !target.TryGetBounds(out var bounds))
-        {
-            Hide();
-            return;
-        }
-        var area = Screen.FromRectangle(bounds).WorkingArea;
-        var gap = Math.Max(4, DeviceDpi / 24);
-        var x = bounds.Right + gap;
-        if (x + Width > area.Right - gap) x = bounds.Right - Width - gap;
-        Location = new Point(
-            Math.Clamp(x, area.Left, Math.Max(area.Left, area.Right - Width)),
-            Math.Clamp(bounds.Bottom - Height, area.Top, Math.Max(area.Top, area.Bottom - Height)));
-        if (!Visible) Show();
-    }
-
-    protected override void Dispose(bool disposing)
-    {
-        if (disposing)
-        {
-            timer.Dispose();
-            tips.Dispose();
-        }
-        base.Dispose(disposing);
-    }
-}
-
 internal sealed class SuggestionForm : Form
 {
     private readonly Label title = new();
@@ -105,6 +21,9 @@ internal sealed class SuggestionForm : Form
     // Compact: the edits are drawn in the field itself, so only the actions are shown unless expanded.
     private bool compact, expanded;
     public event Action? ApplyRequested;
+    // Shown without taking focus, for suggestions that appear on their own while the user may be typing.
+    public bool Passive { get; set; }
+    protected override bool ShowWithoutActivation => Passive;
     public string SuggestedText => suggestedText;
 
     public SuggestionForm(string original, bool external, bool isDark = false)
@@ -290,7 +209,7 @@ internal sealed class SuggestionForm : Form
         var edits = parts.Where((part, i) => !string.IsNullOrWhiteSpace(part.Text)
             && (part.Kind == DiffKind.Removed || (part.Kind == DiffKind.Added && (i == 0 || parts[i - 1].Kind != DiffKind.Removed)))).Count();
         subtitle.Text = !changed ? (inline ? "Looks good · no changes needed" : "No changes needed")
-            : inline ? $"{edits} {(edits == 1 ? "change" : "changes")} marked in your text" : "Suggested changes";
+            : inline ? $"{edits} {(edits == 1 ? "change" : "changes")} marked · click a label to apply just that one" : "Suggested changes";
         details.Text = "Show wording";
         details.Visible = inline && changed;
         apply.Enabled = canApply && changed;

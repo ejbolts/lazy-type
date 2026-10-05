@@ -8,27 +8,44 @@ Local dictation for Windows with NVIDIA GPUs. Whisper Turbo transcribes your spe
 2. The speech and language models load on demand the first time you speak, using your NVIDIA GPU.
 3. When you finish speaking, press the hotkey again (or wait for the two-minute limit).
 4. A compact, rounded, translucent indicator follows your mouse pointer and shows recording and microphone level, followed by transcription and cleanup. It stays within the screen's working area and does not take focus. The microphone closes before model processing starts.
-5. After transcription and cleanup, the models unload automatically, your text is copied to the clipboard, and it is pasted into the original field if it is still focused. Model files remain on disk for the next recording.
+5. After transcription and cleanup, your text is copied to the clipboard and pasted into the original field if it is still focused. The models then unload automatically (after the wording check, when AI suggestions are on); model files remain on disk for the next recording.
+6. With **AI suggestions** on, the wording is checked straight after pasting and any suggested changes are marked in the field (see [AI suggestions](#ai-suggestions)).
 
 **Ctrl+Alt+Shift+Space** toggles recording without grammar cleanup. **Escape** cancels an active recording or processing operation and unloads the models. **Ctrl+Alt+Shift+P** pauses/resumes dictation. Pause and Quit release any model workers and their GPU allocations. Resume only arms dictation; models load on the next recording. The dictation hotkey also resumes automatically when paused.
 
 Closing the settings window hides it to the tray; it does not quit. Use **Quit** to stop everything. The microphone is never opened merely because the app is running. Recording has a two-minute limit and stops/transcribes automatically at that limit. Choose the microphone, hotkey, cleanup preference and startup preference in the app. Models are always released after each dictation, silent recording, cancellation or error; there is no idle retention period.
-
-Enable **AI suggestions · show a wand after dictation** in the main window to add a small wand beside the field you dictated into and beside **Last result** in Lazy Type. This preference is off by default and saved independently of automatic speech cleanup. Click either wand to request a clearer version of the wording and grammar, then compare the original and suggestion in a preview. Choose **Apply suggestion**, **Copy**, or **Keep original**. An already polished result is shown as unchanged.
-
-Suggestions use the same local Qwen model, loaded only after you click the wand and released immediately afterward. They do not open the microphone or load Whisper. Closing a pending preview, disabling suggestions, pressing Escape, pausing, or quitting cancels the request and releases the model. Editing the last result dismisses its preview. Suggestions support results up to 6,000 characters; failed or incomplete edits leave the current text intact.
-
-The external wand follows the field while it is focused, where the editor exposes its bounds. Replacement is offered only when Windows exposes a unique text range for the dictation and the field's text has not changed since insertion. It replaces that range, preserving surrounding text. Unsupported editors, duplicate text, or edited fields use **Copy** instead; the main-window wand remains available even when an external field cannot be located. Nothing is replaced without clicking the apply button.
-
-For a field in another app, the suggestion is shown in the field itself, similar to a grammar checker. While it is generated, the dictated text pulses with a purple highlight. Then removed words are struck through in red, and added words appear in small green labels just above or below where they go (whichever covers less of your other text), with a green caret marking pure insertions such as a new comma. The pop-up shrinks to the actions plus a change count; **Show wording** expands the full comparison. When nothing needs changing, the marks clear and the pop-up says so.
-
-The marks use the same unique text range as replacement, follow scrolling and window moves, never take focus or block clicks, are hidden wherever another window covers the field, and disappear once the field is edited or the preview closes. If an editor cannot report where the changed words are, or for the **Last result** wand in Lazy Type, the pop-up shows the comparison instead: removed words struck through and added words tinted.
 
 Hover over the memory note or its information icon for a measured usage sample. In the 5 October 2026 RTX 4080 test, both warm model workers used 1.01 GiB of system RAM (summed working sets, excluding the app) and approximately 4.15 GiB of additional GPU memory. Speech detection and cleanup were exercised before five samples were taken. GPU usage returned to roughly its baseline after unloading. GPU memory is estimated from the change in whole-device usage, so other applications can affect it. These are warm samples, not live readings or peak limits; longer dictation can change usage.
 
 For the alternate Ctrl+Shift+Space hotkey, add Alt for raw dictation. For F8, use Shift+F8 for raw dictation. Shortcut conflicts are reported so another combination can be selected.
 
 **App theme** defaults to **System** and follows the Windows app color setting, including changes while Lazy Type is running. Choose **Light** or **Dark** to override it. **Popup theme** independently controls the floating dictation indicator: **Follow app** (default), **Light**, or **Dark**. Both choices are saved. Use **Preview** to see the popup for five seconds without opening the microphone or loading models.
+
+## AI suggestions
+
+Turn on **AI suggestions · check wording after dictation** in the main window. It is off by default and saved separately from speech cleanup.
+
+1. Dictate into a field in another app as usual. Cleanup fixes the text and it is pasted.
+2. The dictated text pulses purple while its wording is checked, usually for about a second.
+3. If nothing needs changing, the highlight clears and nothing else appears.
+4. Otherwise the changes are marked in the field, like a grammar checker:
+   - removed words are struck through in red;
+   - added words appear in small green labels just above or below where they go;
+   - a green caret marks a pure insertion, such as a new comma;
+   - a removal with no replacement gets a small red **×** label.
+5. Click any label to apply just that change; the rest stay marked. A compact bar shows the change count: **Apply suggestion** applies everything left, **Keep original** dismisses the marks, **Copy** copies the full suggestion, and **Show wording** expands the full comparison.
+
+The marks and bar never take focus, so you can keep typing. Labels sit on whichever side covers less of your other text. The wand beside **Last result** in Lazy Type runs the same check on demand and shows the comparison in the pop-up.
+
+**How this differs from cleanup.** Both use the same local Qwen model with different instructions. Cleanup is automatic and minimal: it corrects grammar, punctuation and capitalisation, removes fillers, false starts and pause dashes, resolves self-corrections, and otherwise keeps your wording. Suggestions may reword awkward phrasing and improve flow, so they are only applied when you choose. Both keep facts, names, numbers and dates, and never answer questions or follow instructions in the dictation. A suggestion that changes too much or alters a number is discarded.
+
+**Limits and safety.**
+
+- Marks and replacement need Windows to expose the field's text and a unique range for the dictation. Editing the dictated text yourself, duplicate text, or editors that report the pasted text differently disable them; **Copy** still works. The reason (never the dictated text) is written to the log.
+- Only the dictated range is replaced; surrounding text is preserved. Nothing is replaced until you click a label or **Apply suggestion**.
+- Marks follow scrolling and window moves, are hidden wherever another window covers the field, and clear once the field is edited or the bar is closed. If an editor cannot locate every change, the pop-up shows the comparison instead.
+- After a dictation, the text model stays loaded from cleanup for the check and is released straight afterward; from the **Last result** wand it loads only when clicked. The microphone is never opened. Escape, closing the bar, disabling suggestions, pausing or quitting cancels a check and releases the model.
+- Suggestions support results up to 6,000 characters. Failed or incomplete edits leave your text unchanged.
 
 ## Models and privacy
 
@@ -51,7 +68,7 @@ Requirements: Windows 10/11 x64, .NET 8 desktop runtime, .NET 8+ SDK to build, P
 ./scripts/install.ps1
 ```
 
-The script downloads pinned assets, verifies SHA-256 hashes, publishes to `%USERPROFILE%\Applications\LazyType\app`, adds a Start menu shortcut, and enables startup for the current Windows account. `-SkipModels` reuses installed models; `-NoLaunch` installs without starting. If script execution is restricted, run its commands individually according to your machine's policy.
+The script downloads pinned assets, verifies SHA-256 hashes, publishes to `%USERPROFILE%\Applications\LazyType\app`, adds a Start menu shortcut, and enables startup for the current Windows account. `-SkipModels` reuses installed models; `-NoLaunch` installs without starting. If script execution is restricted, run its commands individually according to your machine's policy. If antivirus blocks a freshly built `LazyType.exe`, run the same build through the signed .NET host with `dotnet LazyType.dll`, or add the build and install folders to its exceptions.
 
 ```powershell
 dotnet build src/LazyType/LazyType.csproj -c Release
@@ -71,7 +88,7 @@ This explicit diagnostic loads both models, exercises speech detection and clean
 
 `Test WAV…` runs a local WAV through transcription and cleanup without inserting into another app. It accepts recordings up to two minutes and converts their audio format as needed.
 
-The headless integration check runs the real CUDA engines against the whisper.cpp JFK sample, checks cleanup and suggestion preservation of numbers and dates, ensures questions and embedded instructions are only edited, checks safe replacement matching and preference serialization, verifies text-only suggestion loading, checks silent audio, and unloads both models:
+The headless integration check runs the real CUDA engines against the whisper.cpp JFK sample, checks cleanup and suggestion preservation of numbers and dates, ensures questions and embedded instructions are only edited, checks safe replacement matching, suggestion change marking and single-change application, preference serialization, verifies text-only suggestion loading, checks silent audio, and unloads both models:
 
 ```powershell
 ./src/LazyType/bin/Release/net8.0-windows/LazyType.exe --self-test artifacts/verification/jfk.wav artifacts/verification/models-test.json
@@ -79,6 +96,6 @@ The headless integration check runs the real CUDA engines against the whisper.cp
 
 For reproducible native input testing, first quit the normal instance, then launch with `--test-audio <16kHz-mono-16bit.wav>`. This explicitly labelled test mode uses the fixture when the recording hotkey is toggled and never opens the microphone. All model processing and insertion are real. Use `tests/editor.html` as a local plain/rich-text target. Never enable this switch in the installed startup entry.
 
-Add `--test-session` alongside `--test-audio` to test without closing the installed app. This separate instance uses F8 / Shift+F8, fresh in-memory settings, and disabled startup controls. It does not save preferences, listen on the normal instance's command pipe, or register the pause shortcut. Turn on suggestions in this test window, dictate into the local test page, click the floating wand, and review/apply or copy the rewrite. Also check the main-window wand, unchanged wording, dismiss/Escape, disabling the toggle, and editing the target before applying. Keep any browser or desktop target limited to disposable sample text.
+Add `--test-session` alongside `--test-audio` to test without closing the installed app. This separate instance uses F8 / Shift+F8, fresh in-memory settings, and disabled startup controls. It does not save preferences, listen on the normal instance's command pipe, or register the pause shortcut. Turn on suggestions in this test window and dictate into the plain and rich-text fields of the local test page; the marks appear automatically. Click one label, then apply the rest. Also check already clean wording (nothing should appear), **Show wording**, **Keep original**, Escape, disabling the toggle, editing the field before applying, and the **Last result** wand. Keep any browser or desktop target limited to disposable sample text.
 
 Verification artifacts are ignored under `artifacts/`. See `THIRD-PARTY.md` for component sources and licenses.

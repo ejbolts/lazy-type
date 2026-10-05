@@ -205,7 +205,12 @@ internal sealed class TrayApp : ApplicationContext
         {
             overlay.Present("Cleaning up…"); Status("Cleaning up your wording", "Microphone off · Qwen is editing locally");
             try { result = await engines.CleanupAsync(transcript, ct); }
-            catch (Exception) when (!ct.IsCancellationRequested) { fallback = true; AppLog.Write("Cleanup failed; original transcript retained."); }
+            catch (Exception) when (!ct.IsCancellationRequested)
+            {
+                fallback = true;
+                result = EngineHost.CleanPauseDashes(transcript);
+                AppLog.Write("Cleanup failed; original transcript retained with pause dashes removed.");
+            }
         }
         ct.ThrowIfCancellationRequested(); form.Result.Text = result;
         Native.SetClipboardText(result);
@@ -224,8 +229,12 @@ internal sealed class TrayApp : ApplicationContext
         AppLog.Write($"Dictation complete: {seconds:F1}s; inserted={inserted}; raw={raw}; fallback={fallback}.");
         if (!inserted && destination != null)
         {
-            tray.ShowBalloonTip(4000, "Your text is ready", "Focus changed or insertion was blocked. Open Lazy Type to copy your result.", ToolTipIcon.Info);
-            Status("Text ready to copy · models unloaded", "The original field is no longer focused. Your result is safely available below.");
+            tray.ShowBalloonTip(4000, "Your text is ready", "Focus changed or insertion was blocked. Your text is copied to your clipboard and ready to paste.", ToolTipIcon.Info);
+            Status("Text copied to clipboard · models unloaded", "The original field is no longer focused. Your result is copied to your clipboard.");
+        }
+        else if (destination == null)
+        {
+            Status("Text copied to clipboard · models unloaded", "Your result was copied to the clipboard and is ready to paste.");
         }
         else Status("Ready · models unloaded", fallback ? "Cleanup was unavailable. Your original text was kept." : $"Microphone off · Last dictation processed in {seconds:F1}s · All processing stayed on this PC");
     }

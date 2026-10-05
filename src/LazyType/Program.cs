@@ -139,6 +139,12 @@ internal static class SelfTest
             if (!EngineHost.PlausibleCleanup("Hello world.", "Hello, world!")) throw new Exception("Cleanup validation rejected a normal edit.");
             if (EngineHost.PlausibleCleanup(new string('a', 200), "Yes")) throw new Exception("Cleanup truncation guard failed.");
             if (EngineHost.NormalizeTranscript("[BLANK_AUDIO]") != "") throw new Exception("Silence normalization failed.");
+            if (EngineHost.CleanPauseDashes("I was thinking — we should go.") != "I was thinking we should go.") throw new Exception("Em dash cleanup failed.");
+            if (EngineHost.CleanPauseDashes("— Leading pause dash") != "Leading pause dash") throw new Exception("Leading pause dash cleanup failed.");
+            if (EngineHost.CleanPauseDashes("Trailing pause dash —") != "Trailing pause dash") throw new Exception("Trailing pause dash cleanup failed.");
+            if (EngineHost.CleanPauseDashes("Wait, — no.") != "Wait, no.") throw new Exception("Em dash next to comma cleanup failed.");
+            if (EngineHost.CleanPauseDashes("Real-time test of pages 10–12") != "Real-time test of pages 10–12") throw new Exception("Hyphen and number range preservation failed.");
+            if (EngineHost.CleanPauseDashes("Well, um -- I think so.") != "Well, um I think so.") throw new Exception("Double hyphen cleanup failed.");
             if (!EngineHost.PreservesNumbers("Version 2.4 costs $12 at 10:30.", "At 10:30, version 2.4 costs $12.")
                 || EngineHost.PreservesNumbers("Version 2.4 costs $12.", "Version 2.5 costs $12.")
                 || EngineHost.PreservesNumbers("12 tasks", "12 tasks and 12 notes")) throw new Exception("Suggestion numeric preservation guard failed.");
@@ -149,13 +155,21 @@ internal static class SelfTest
             if (JsonSerializer.Deserialize<AppSettings>("{}")!.Suggestions
                 || !JsonSerializer.Deserialize<AppSettings>(JsonSerializer.Serialize(new AppSettings { Suggestions = true }))!.Suggestions)
                 throw new Exception("Suggestion preference default or serialization failed.");
+            var testClipboard = "LazyType test clipboard: " + Guid.NewGuid();
+            if (!Native.SetClipboardText(testClipboard)) throw new Exception("Native.SetClipboardText returned false.");
+            if (Clipboard.GetText() != testClipboard) throw new Exception("Clipboard text mismatch after Native.SetClipboardText.");
             using var engines = new EngineHost(); using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(5));
             var timer = Stopwatch.StartNew(); await engines.EnsureReadyAsync(timeout.Token);
             report["coldLoadSeconds"] = timer.Elapsed.TotalSeconds;
             timer.Restart(); var transcript = await engines.TranscribeAsync(await File.ReadAllBytesAsync(args[1]), timeout.Token);
             report["transcription"] = transcript; report["transcriptionSeconds"] = timer.Elapsed.TotalSeconds;
             if (!transcript.Contains("country", StringComparison.OrdinalIgnoreCase)) throw new Exception("Sample speech transcription did not contain expected words.");
-            var samples = new[] { "Um, can you move the meeting to Friday, sorry, Thursday afternoon?", "Please add three tasks to Notion: update the README, test the RTX 4080, and check version 2.4.", "Can you explain how photosynthesis works?" };
+            var samples = new[] {
+                "Um, can you move the meeting to Friday, sorry, Thursday afternoon?",
+                "Please add three tasks to Notion: update the README, test the RTX 4080, and check version 2.4.",
+                "Can you explain how photosynthesis works?",
+                "I was thinking — wait, let's go tomorrow instead."
+            };
             var edits = new List<object>();
             foreach (var sample in samples)
             {
@@ -164,6 +178,7 @@ internal static class SelfTest
                 if (sample.Contains("photosynthesis") && clean.Length > 100) throw new Exception("Cleanup answered a dictated question.");
                 if (sample.Contains("Thursday") && !clean.Contains("Thursday")) throw new Exception("Cleanup lost a correction.");
                 if (sample.Contains("4080") && (!clean.Contains("4080") || !clean.Contains("2.4"))) throw new Exception("Cleanup lost a number.");
+                if (sample.Contains('—') && (clean.Contains('—') || clean.Contains("--"))) throw new Exception("Cleanup did not remove em dash from pauses.");
             }
             report["cleanup"] = edits;
             engines.Stop(); timer.Restart(); await engines.EnsureTextReadyAsync(timeout.Token);

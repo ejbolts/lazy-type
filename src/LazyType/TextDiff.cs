@@ -5,6 +5,8 @@ namespace LazyType;
 internal enum DiffKind { Equal, Removed, Added }
 internal readonly record struct DiffPart(DiffKind Kind, string Text);
 internal readonly record struct TextSpan(int Start, int Length);
+// Struck marks remove Span (and show Added in its place); insertions show Added before or after the Span word.
+internal readonly record struct ChangeMark(TextSpan Span, bool Struck, string? Added, bool Before);
 
 // Word-level comparison of the original and suggested wording, so only what a suggestion changes is marked.
 internal static class TextDiff
@@ -76,38 +78,31 @@ internal static class TextDiff
     // Whitespace-only differences are not worth applying.
     public static bool HasChanges(IEnumerable<DiffPart> parts) => parts.Any(part => part.Kind != DiffKind.Equal && !string.IsNullOrWhiteSpace(part.Text));
 
-    // Ranges of the original text that the suggestion edits. A pure insertion marks the word just before it.
-    public static List<TextSpan> ChangedSpans(string original, IReadOnlyList<DiffPart> parts)
+    // Where each edit appears in the original text: removed words are struck through, and added words are
+    // shown beside them. A pure insertion is anchored to the word before it (or after it, at the very start).
+    public static List<ChangeMark> Marks(string original, IReadOnlyList<DiffPart> parts)
     {
-        var spans = new List<TextSpan>();
+        var marks = new List<ChangeMark>();
         var offset = 0;
         for (var i = 0; i < parts.Count; i++)
         {
             var part = parts[i];
             if (part.Kind == DiffKind.Added)
             {
-                var replaced = i > 0 && parts[i - 1].Kind == DiffKind.Removed;
-                if (!replaced && !string.IsNullOrWhiteSpace(part.Text) && NearestWord(original, offset) is { } word) spans.Add(word);
+                var replaced = i > 0 && parts[i - 1].Kind == DiffKind.Removed && !string.IsNullOrWhiteSpace(parts[i - 1].Text);
+                if (!replaced && !string.IsNullOrWhiteSpace(part.Text) && NearestWord(original, offset) is { } word)
+                    marks.Add(new ChangeMark(word, false, part.Text.Trim(), word.Start >= offset));
                 continue;
             }
             if (part.Kind == DiffKind.Removed && !string.IsNullOrWhiteSpace(part.Text))
             {
                 var start = offset + (part.Text.Length - part.Text.TrimStart().Length);
-                spans.Add(new TextSpan(start, part.Text.Trim().Length));
+                var added = i + 1 < parts.Count && parts[i + 1].Kind == DiffKind.Added ? parts[i + 1].Text.Trim() : null;
+                marks.Add(new ChangeMark(new TextSpan(start, part.Text.Trim().Length), true, string.IsNullOrEmpty(added) ? null : added, false));
             }
             offset += part.Text.Length;
         }
-        var merged = new List<TextSpan>();
-        foreach (var span in spans.OrderBy(s => s.Start))
-        {
-            if (merged.Count > 0 && span.Start <= merged[^1].Start + merged[^1].Length)
-            {
-                var last = merged[^1];
-                merged[^1] = new TextSpan(last.Start, Math.Max(last.Start + last.Length, span.Start + span.Length) - last.Start);
-            }
-            else merged.Add(span);
-        }
-        return merged;
+        return marks;
     }
 
     private static TextSpan? NearestWord(string text, int position)

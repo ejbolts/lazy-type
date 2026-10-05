@@ -51,10 +51,10 @@ internal static class Program
 
             const string original = "yeah okay i checked the layout and it does seem to be working its much cleaner now";
             const string polished = "Yeah, okay, I checked the layout, and it does seem to be working. It's much cleaner now.";
-            foreach (var (name, suggested, dark) in new[] { ("suggestion_form_rendered", polished, false), ("suggestion_form_dark", polished, true), ("suggestion_form_unchanged", original, true) })
+            foreach (var (name, suggested, dark, inline) in new[] { ("suggestion_form_rendered", polished, false, false), ("suggestion_form_dark", polished, true, false), ("suggestion_form_unchanged", original, true, false), ("suggestion_form_inline", polished, true, true), ("suggestion_form_inline_light", polished, false, true) })
             {
-                using var sugg = new SuggestionForm(original, false, dark);
-                sugg.ShowSuggestion(suggested, TextDiff.Compare(original, suggested), true);
+                using var sugg = new SuggestionForm(original, inline, dark);
+                sugg.ShowSuggestion(suggested, TextDiff.Compare(original, suggested), true, inline);
                 sugg.Show();
                 System.Windows.Forms.Application.DoEvents();
                 Thread.Sleep(300);
@@ -160,10 +160,12 @@ internal static class SelfTest
                 if (string.Concat(parts.Where(p => p.Kind != DiffKind.Added).Select(p => p.Text)) != before
                     || string.Concat(parts.Where(p => p.Kind != DiffKind.Removed).Select(p => p.Text)) != after) throw new Exception("Suggestion comparison lost text.");
             }
-            var marked = TextDiff.ChangedSpans("yeah okay i checked", TextDiff.Compare("yeah okay i checked", "Yeah, okay, I checked"));
-            if (!marked.SequenceEqual(new[] { new TextSpan(0, 4), new TextSpan(10, 1) })
+            var marked = TextDiff.Marks("yeah okay i checked", TextDiff.Compare("yeah okay i checked", "Yeah, okay, I checked"));
+            var inserted = TextDiff.Marks("send it today", TextDiff.Compare("send it today", "Please send it today"));
+            if (!marked.SequenceEqual(new[] { new ChangeMark(new TextSpan(0, 4), true, "Yeah,", false), new ChangeMark(new TextSpan(10, 1), true, ", I", false) })
+                || !inserted.SequenceEqual(new[] { new ChangeMark(new TextSpan(0, 4), false, "Please", true) })
                 || TextDiff.HasChanges(TextDiff.Compare("Same text.", "Same text. "))
-                || TextDiff.ChangedSpans("Same text.", TextDiff.Compare("Same text.", "Same text.")).Count != 0) throw new Exception("Suggestion change marking failed.");
+                || TextDiff.Marks("Same text.", TextDiff.Compare("Same text.", "Same text.")).Count != 0) throw new Exception("Suggestion change marking failed.");
             if (JsonSerializer.Deserialize<AppSettings>("{}")!.Suggestions
                 || !JsonSerializer.Deserialize<AppSettings>(JsonSerializer.Serialize(new AppSettings { Suggestions = true }))!.Suggestions)
                 throw new Exception("Suggestion preference default or serialization failed.");

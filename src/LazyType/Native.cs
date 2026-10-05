@@ -100,7 +100,7 @@ internal sealed class TextTarget
     private string? insertedText, documentSnapshot;
     private TextPatternRange? insertionRange;
     private IReadOnlyList<TextSpan>? markedSpans;
-    private TextPatternRange[]? markedRanges;
+    private TextPatternRange?[]? markedRanges;
     public static TextTarget Capture()
     {
         var target = new TextTarget { Window = Native.GetForegroundWindow() };
@@ -179,30 +179,44 @@ internal sealed class TextTarget
         return OwnsPoint(line.Left + inset, y) && OwnsPoint(line.Right - 1 - inset, y);
     }
     private bool OwnsPoint(int x, int y) => Window != IntPtr.Zero && Native.GetAncestor(Native.WindowFromPoint(new Native.POINT { X = x, Y = y }), 2 /* GA_ROOT */) == Window;
-    // Screen bounds of each visible line of the dictation, or only of the given spans within it, clipped to the field.
-    // Empty once the field changes.
-    public Rectangle[] InsertionLineBounds(IReadOnlyList<TextSpan>? spans = null)
+    // Screen bounds of each visible line of the dictation, clipped to the field. Empty once the field changes.
+    public Rectangle[] InsertionLineBounds() => Bounds(null)?[0] ?? Array.Empty<Rectangle>();
+    // Line bounds for each span of the dictation, in order. Null once the field changes; an entry is empty
+    // when the editor cannot locate that span.
+    public Rectangle[][]? SpanBounds(IReadOnlyList<TextSpan> spans) => Bounds(spans);
+    private Rectangle[][]? Bounds(IReadOnlyList<TextSpan>? spans)
     {
         try
         {
-            if (!CanReplaceInsertion()) return Array.Empty<Rectangle>();
+            if (!CanReplaceInsertion()) return null;
             insertionRange ??= TextPattern()?.DocumentRange.FindText(insertedText!, false, false);
-            if (insertionRange == null || insertionRange.GetText(-1) != insertedText) { insertionRange = null; markedRanges = null; return Array.Empty<Rectangle>(); }
+            if (insertionRange == null || insertionRange.GetText(-1) != insertedText) { insertionRange = null; markedRanges = null; return null; }
             if (spans != null && (markedRanges == null || !ReferenceEquals(spans, markedSpans)))
             {
                 markedSpans = spans;
-                markedRanges = spans.Select(SpanRange).OfType<TextPatternRange>().ToArray();
+                markedRanges = spans.Select(SpanRange).ToArray();
             }
-            var ranges = spans == null ? new[] { insertionRange } : markedRanges!;
+            var ranges = spans == null ? new TextPatternRange?[] { insertionRange } : markedRanges!;
             var field = element!.Current.BoundingRectangle;
-            return ranges.SelectMany(range => range.GetBoundingRectangles())
-                .Select(line => System.Windows.Rect.Intersect(line, field))
-                .Where(line => !line.IsEmpty && line.Width >= 1 && line.Height >= 4)
-                .Select(line => Rectangle.FromLTRB((int)Math.Floor(line.Left), (int)Math.Floor(line.Top), (int)Math.Ceiling(line.Right), (int)Math.Ceiling(line.Bottom)))
-                .ToArray();
+            return ranges.Select(range => range == null ? Array.Empty<Rectangle>() : ClipLines(range.GetBoundingRectangles(), field)).ToArray();
         }
-        catch { insertionRange = null; markedRanges = null; return Array.Empty<Rectangle>(); }
+        catch { insertionRange = null; markedRanges = null; return null; }
     }
+    // Screen bounds of every visible line of text in the field, so labels can avoid covering neighbouring lines.
+    public Rectangle[] TextLineBounds()
+    {
+        try
+        {
+            var pattern = TextPattern();
+            return pattern == null ? Array.Empty<Rectangle>() : ClipLines(pattern.DocumentRange.GetBoundingRectangles(), element!.Current.BoundingRectangle);
+        }
+        catch { return Array.Empty<Rectangle>(); }
+    }
+    private static Rectangle[] ClipLines(IEnumerable<System.Windows.Rect> lines, System.Windows.Rect field) => lines
+        .Select(line => System.Windows.Rect.Intersect(line, field))
+        .Where(line => !line.IsEmpty && line.Width >= 1 && line.Height >= 4)
+        .Select(line => Rectangle.FromLTRB((int)Math.Floor(line.Left), (int)Math.Floor(line.Top), (int)Math.Ceiling(line.Right), (int)Math.Ceiling(line.Bottom)))
+        .ToArray();
     // A range for part of the dictation, used only if the editor reports exactly the expected text.
     private TextPatternRange? SpanRange(TextSpan span)
     {

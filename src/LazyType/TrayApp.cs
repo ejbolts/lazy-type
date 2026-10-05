@@ -321,8 +321,13 @@ internal sealed class TrayApp : ApplicationContext
             if (suggestionForm == preview && form.Result.Text == source)
             {
                 var parts = TextDiff.Compare(source, text);
-                preview.ShowSuggestion(text, parts, destination == null || destination.CanReplaceInsertion());
-                highlight.Settle(TextDiff.HasChanges(parts) ? TextDiff.ChangedSpans(source, parts) : Array.Empty<TextSpan>());
+                var canApply = destination == null || destination.CanReplaceInsertion();
+                // Mark the edits in the field when the editor can locate them; otherwise show the full comparison.
+                var inline = destination != null && canApply
+                    && highlight.Settle(TextDiff.HasChanges(parts) ? TextDiff.Marks(source, parts) : Array.Empty<ChangeMark>());
+                if (!inline) highlight.Dismiss();
+                preview.ShowSuggestion(text, parts, canApply, inline);
+                PositionPreview();
             }
             Status("Suggestion ready · models unloaded", "Review the suggestion before applying. Your original transcript is still available.");
         }

@@ -96,11 +96,14 @@ internal sealed class SuggestionForm : Form
     private readonly ModernButton keep = new();
     private readonly ModernButton copy = new();
     private readonly Button close = new();
+    private readonly LinkLabel details = new();
     private readonly Panel headerPanel = new();
     private readonly System.Windows.Forms.Timer copyResetTimer = new() { Interval = 1600 };
     private bool isDark;
     private string suggestedText = string.Empty;
     private IReadOnlyList<DiffPart>? changes;
+    // Compact: the edits are drawn in the field itself, so only the actions are shown unless expanded.
+    private bool compact, expanded;
     public event Action? ApplyRequested;
     public string SuggestedText => suggestedText;
 
@@ -138,7 +141,7 @@ internal sealed class SuggestionForm : Form
         title.Text = "A little polish";
         title.Font = new Font("Segoe UI", 11.5f, FontStyle.Bold);
         title.AutoSize = false;
-        title.SetBounds(28, 4, 260, 24);
+        title.SetBounds(28, 4, 220, 24);
         title.BackColor = Color.Transparent;
         title.Cursor = Cursors.SizeAll;
         title.MouseDown += (_, e) =>
@@ -159,7 +162,23 @@ internal sealed class SuggestionForm : Form
         close.Cursor = Cursors.Hand;
         close.Click += (_, _) => Close();
 
+        details.Text = "Show wording";
+        details.Font = new Font("Segoe UI", 8.5f);
+        details.AutoSize = false;
+        details.TextAlign = ContentAlignment.MiddleRight;
+        details.SetBounds(headerPanel.Width - 140, 6, 108, 22);
+        details.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+        details.LinkBehavior = LinkBehavior.HoverUnderline;
+        details.Visible = false;
+        details.LinkClicked += (_, _) =>
+        {
+            expanded = !expanded;
+            details.Text = expanded ? "Hide wording" : "Show wording";
+            UpdateLayout();
+        };
+
         headerPanel.Controls.Add(title);
+        headerPanel.Controls.Add(details);
         headerPanel.Controls.Add(close);
 
         // Subtitle
@@ -190,6 +209,7 @@ internal sealed class SuggestionForm : Form
         apply.Style = ModernButton.ButtonStyle.Primary;
         apply.SetBounds(0, 6, 154, 34);
         apply.Click += (_, _) => ApplyRequested?.Invoke();
+        apply.Enabled = false; // until a suggestion arrives
 
         keep.Text = "Keep original";
         keep.Style = ModernButton.ButtonStyle.Secondary;
@@ -228,6 +248,12 @@ internal sealed class SuggestionForm : Form
         };
 
         ApplyTheme(isDark);
+        if (external)
+        {
+            compact = true;
+            subtitle.Text = "Checking your wording…";
+            UpdateLayout();
+        }
     }
 
     private void UpdateRegion()
@@ -254,24 +280,45 @@ internal sealed class SuggestionForm : Form
         UpdateRegion();
     }
 
-    public void ShowSuggestion(string text, IReadOnlyList<DiffPart> parts, bool canApply)
+    // inline: the edits are already marked in the field, so the comparison stays hidden unless expanded.
+    public void ShowSuggestion(string text, IReadOnlyList<DiffPart> parts, bool canApply, bool inline = false)
     {
         suggestedText = text;
         var changed = TextDiff.HasChanges(parts);
         changes = changed ? parts : null;
-        subtitle.Text = changed ? "Suggested changes" : "No changes needed";
+        compact = inline; expanded = false;
+        var edits = parts.Where((part, i) => !string.IsNullOrWhiteSpace(part.Text)
+            && (part.Kind == DiffKind.Removed || (part.Kind == DiffKind.Added && (i == 0 || parts[i - 1].Kind != DiffKind.Removed)))).Count();
+        subtitle.Text = !changed ? (inline ? "Looks good · no changes needed" : "No changes needed")
+            : inline ? $"{edits} {(edits == 1 ? "change" : "changes")} marked in your text" : "Suggested changes";
+        details.Text = "Show wording";
+        details.Visible = inline && changed;
         apply.Enabled = canApply && changed;
         apply.Text = changed ? "Apply suggestion" : "Already optimal";
         RenderChanges();
-        AdjustHeight();
+        UpdateLayout();
     }
 
     public void ShowFailure(string message)
     {
         changes = null;
+        compact = false; details.Visible = false;
+        subtitle.Text = "Suggested wording";
         suggestion.Text = message;
         apply.Enabled = false;
-        AdjustHeight();
+        UpdateLayout();
+    }
+
+    private void UpdateLayout()
+    {
+        contentCard.Visible = !compact || expanded;
+        if (contentCard.Visible) AdjustHeight();
+        else
+        {
+            Height = Padding.Vertical + headerPanel.Height + subtitle.Height + 50;
+            UpdateRegion();
+            Invalidate();
+        }
     }
 
     private void RenderChanges()
@@ -344,6 +391,8 @@ internal sealed class SuggestionForm : Form
         if (!string.IsNullOrEmpty(suggestedText)) RenderChanges();
 
         close.ForeColor = dark ? Color.FromArgb(180, 175, 200) : Color.FromArgb(120, 125, 140);
+        details.LinkColor = details.ActiveLinkColor = dark ? Color.FromArgb(190, 160, 255) : Color.FromArgb(109, 64, 204);
+        details.BackColor = Color.Transparent;
         close.BackColor = Color.Transparent;
 
         apply.IsDark = dark;
@@ -369,6 +418,7 @@ internal sealed class SuggestionForm : Form
         }
 
         // Draw rounded border around suggestion card
+        if (!contentCard.Visible) return;
         var cardBounds = new Rectangle(contentCard.Left, contentCard.Top, contentCard.Width - 1, contentCard.Height - 1);
         Color cardBorder = isDark ? Color.FromArgb(58, 48, 88) : Color.FromArgb(233, 215, 254);
         using (var cardPen = new Pen(cardBorder, 1.2f))

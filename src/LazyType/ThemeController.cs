@@ -37,6 +37,8 @@ internal sealed class ThemeController : IDisposable
         _ => fallback
     };
 
+    internal static bool IsSystemDark => SystemDark;
+
     private static bool SystemDark
     {
         get
@@ -59,32 +61,39 @@ internal sealed class ThemeController : IDisposable
 
     private void Apply()
     {
-        var dark = Resolve(settings.Theme, SystemDark);
-        form.ApplyTheme(dark);
-        var popupDark = Resolve(settings.PopupTheme, dark);
-        overlay.ApplyTheme(popupDark); preview.ApplyTheme(popupDark);
-    }
-
-    private void SystemPreferenceChanged(object sender, UserPreferenceChangedEventArgs e)
-    {
-        if (disposed || form.IsDisposed || !form.IsHandleCreated) return;
-        try { form.BeginInvoke((Action)(() => { if (!disposed) Apply(); })); }
-        catch (InvalidOperationException) { } // Window may close while Windows broadcasts the change.
+        var appDark = Resolve(settings.Theme, SystemDark);
+        var popupDark = Resolve(settings.PopupTheme, appDark);
+        form.ApplyTheme(appDark);
+        overlay.ApplyTheme(popupDark);
+        preview.ApplyTheme(popupDark);
     }
 
     private void Preview()
     {
+        var popupDark = Resolve(settings.PopupTheme, Resolve(settings.Theme, SystemDark));
+        preview.ApplyTheme(popupDark);
         preview.PresentPreview();
         previewTimer.Stop(); previewTimer.Start();
     }
 
+    private void SystemPreferenceChanged(object sender, UserPreferenceChangedEventArgs e)
+    {
+        if (e.Category == UserPreferenceCategory.General || e.Category == UserPreferenceCategory.Color)
+            UI(Apply);
+    }
+
+    private void UI(Action action)
+    {
+        if (!disposed && !form.IsDisposed)
+            try { if (form.InvokeRequired) form.BeginInvoke(action); else action(); } catch { }
+    }
+
     public void Dispose()
     {
+        if (disposed) return;
         disposed = true;
         SystemEvents.UserPreferenceChanged -= SystemPreferenceChanged;
-        form.ThemeChoice.SelectedIndexChanged -= SelectionChanged;
-        form.PopupThemeChoice.SelectedIndexChanged -= SelectionChanged;
-        form.PreviewPopupRequested -= Preview;
-        previewTimer.Dispose(); preview.Dispose();
+        previewTimer.Dispose();
+        preview.Dispose();
     }
 }

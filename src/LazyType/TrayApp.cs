@@ -270,7 +270,8 @@ internal sealed class TrayApp : ApplicationContext
         if (!settings.Suggestions || recording || processing || paused || closing || string.IsNullOrWhiteSpace(form.Result.Text)) return;
         var source = form.Result.Text;
         CloseSuggestion();
-        var preview = new SuggestionForm(source, destination != null);
+        var popupDark = ThemeController.Resolve(settings.PopupTheme, ThemeController.Resolve(settings.Theme, ThemeController.IsSystemDark));
+        var preview = new SuggestionForm(source, destination != null, popupDark);
         suggestionForm = preview;
         var anchor = destination != null && destination.TryGetBounds(out var field) ? field : form.Bounds;
         void PositionPreview()

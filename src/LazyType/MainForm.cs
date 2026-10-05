@@ -25,6 +25,7 @@ internal sealed class MainForm : Form
 
     // Last result card
     private readonly Panel resultCard = new();
+    private readonly Panel editorPanel = new();
     public readonly TextBox Result = new();
     public readonly TextBox Original = new();
     private readonly WandButton suggest = new();
@@ -64,6 +65,10 @@ internal sealed class MainForm : Form
         StartPosition = FormStartPosition.CenterScreen;
         Icon = Native.MakeIcon(Color.FromArgb(127, 86, 217));
         DoubleBuffered = true;
+
+        Clean.Text = string.Empty;
+        Suggestions.Text = string.Empty;
+        Startup.Text = string.Empty;
 
         var root = new Panel { Dock = DockStyle.Fill, Padding = new Padding(24, 20, 24, 16) };
         Controls.Add(root);
@@ -152,7 +157,7 @@ internal sealed class MainForm : Form
         copyBtn.Text = "Copy";
         copyBtn.Style = ModernButton.ButtonStyle.Secondary;
         copyBtn.CornerRadius = 6;
-        copyBtn.SetBounds(resultHeader.Width - 75, 0, 72, 28);
+        copyBtn.SetBounds(resultHeader.Width - 96, 0, 92, 28);
         copyBtn.Anchor = AnchorStyles.Top | AnchorStyles.Right;
         copyBtn.IconDrawAction = (g, rect, col) => VectorIcons.DrawCopy(g, rect, col);
         copyBtn.Click += (_, _) =>
@@ -175,7 +180,8 @@ internal sealed class MainForm : Form
         resultHeader.Controls.Add(copyBtn);
 
         // Result editor area
-        var editorPanel = new Panel { Dock = DockStyle.Fill, Padding = new Padding(0, 6, 0, 6) };
+        editorPanel.Dock = DockStyle.Fill;
+        editorPanel.Padding = new Padding(0, 6, 0, 6);
         Result.Multiline = true;
         Result.ScrollBars = ScrollBars.Vertical;
         Result.Dock = DockStyle.Fill;
@@ -189,8 +195,13 @@ internal sealed class MainForm : Form
         suggest.Click += (_, _) => SuggestionRequested?.Invoke();
         tips.SetToolTip(suggest, "A little polish · Refine wording with dual sparkle stars");
 
-        editorPanel.Controls.Add(suggest);
         editorPanel.Controls.Add(Result);
+        editorPanel.Controls.Add(suggest);
+        editorPanel.Resize += (_, _) =>
+        {
+            suggest.Location = new Point(editorPanel.Width - 44, editorPanel.Height - 44);
+            suggest.BringToFront();
+        };
 
         // Accordion for Original transcript
         var accordionContainer = new Panel { Dock = DockStyle.Bottom, AutoSize = true };
@@ -301,12 +312,13 @@ internal sealed class MainForm : Form
 
         if (rightControl is ModernCheckBox cb)
         {
+            cb.Text = string.Empty;
             lblTitle.Click += (_, _) => cb.Checked = !cb.Checked;
             iconBox.Click += (_, _) => cb.Checked = !cb.Checked;
             row.Click += (_, _) => cb.Checked = !cb.Checked;
-            cb.Location = new Point(row.Width - 34, (row.Height - 24) / 2);
+            cb.Location = new Point(row.Width - 28, (row.Height - 22) / 2);
             cb.Anchor = AnchorStyles.Top | AnchorStyles.Right;
-            cb.Size = new Size(26, 24);
+            cb.Size = new Size(22, 22);
         }
         else
         {
@@ -365,7 +377,6 @@ internal sealed class MainForm : Form
         using var borderPen = new Pen(cardBorder, 1.2f);
         DrawingHelpers.DrawRoundedRectangle(g, borderPen, bounds, 10);
 
-        // Draw keycaps based on currentHotkey
         var keys = currentHotkey.Split('+');
         int x = 12;
         int y = (shortcutCard.Height - 26) / 2;
@@ -394,7 +405,6 @@ internal sealed class MainForm : Form
             }
         }
 
-        // Draw subtle vertical divider before action label
         int divX = shortcutCard.Width - 190;
         using var divPen = new Pen(cardBorder, 1f);
         g.DrawLine(divPen, divX, y + 2, divX, y + 24);
@@ -471,7 +481,9 @@ internal sealed class MainForm : Form
         Suggestions.IsDark = dark;
         Startup.IsDark = dark;
 
-        Result.BackColor = dark ? Color.FromArgb(24, 28, 38) : Color.White;
+        Color cardBack = dark ? Color.FromArgb(24, 28, 38) : Color.White;
+        editorPanel.BackColor = cardBack;
+        Result.BackColor = cardBack;
         Result.ForeColor = ForeColor;
 
         Original.BackColor = dark ? Color.FromArgb(20, 24, 32) : Color.FromArgb(245, 247, 250);
@@ -482,8 +494,7 @@ internal sealed class MainForm : Form
         gearBtn.IsDark = dark;
         copyBtn.IsDark = dark;
 
-        suggest.BackColor = dark ? Color.FromArgb(48, 36, 80) : Color.FromArgb(243, 238, 255);
-        suggest.ForeColor = Color.FromArgb(127, 86, 217);
+        suggest.IsDark = dark;
 
         int useDark = dark ? 1 : 0;
         Native.DwmSetWindowAttribute(Handle, 20, ref useDark, sizeof(int));
@@ -537,10 +548,19 @@ internal sealed class MainForm : Form
         UpdateSuggestionButton();
     }
 
-    private void UpdateSuggestionButton()
+    public WandButton SuggestButton => suggest;
+    public bool SuggestVisible => suggest.Visible;
+    public Rectangle SuggestBounds => suggest.Bounds;
+    public string SuggestParent => suggest.Parent?.Name ?? suggest.Parent?.GetType().Name ?? "null";
+    public void UpdateSuggestionButton()
     {
         suggest.Visible = Suggestions.Checked && !string.IsNullOrWhiteSpace(Result.Text);
         suggest.Enabled = !suggestionBusy;
+        if (suggest.Visible)
+        {
+            suggest.Location = new Point(editorPanel.Width - 44, editorPanel.Height - 44);
+            suggest.BringToFront();
+        }
     }
 
     public void ShowWindow()

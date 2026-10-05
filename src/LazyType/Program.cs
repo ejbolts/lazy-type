@@ -30,12 +30,22 @@ internal static class Program
             form.Mic.Items.Add("Microphone Array (Realtek Audio)");
             form.Mic.SelectedIndex = 0;
             form.Show();
+            form.UpdateSuggestionButton();
+
             System.Windows.Forms.Application.DoEvents();
             Thread.Sleep(300);
 
             using (var bmp = new Bitmap(form.Width, form.Height))
             {
                 form.DrawToBitmap(bmp, new Rectangle(0, 0, form.Width, form.Height));
+                if (form.SuggestVisible && form.SuggestButton.Parent != null)
+                {
+                    var pt = form.PointToClient(form.SuggestButton.Parent.PointToScreen(form.SuggestButton.Location));
+                    using var g = Graphics.FromImage(bmp);
+                    using var bBmp = new Bitmap(form.SuggestButton.Width, form.SuggestButton.Height);
+                    form.SuggestButton.DrawToBitmap(bBmp, new Rectangle(0, 0, form.SuggestButton.Width, form.SuggestButton.Height));
+                    g.DrawImage(bBmp, pt.X, pt.Y);
+                }
                 bmp.Save(Path.Combine(outDir, "main_form_rendered.png"), ImageFormat.Png);
             }
 
@@ -51,6 +61,7 @@ internal static class Program
                 bmpSugg.Save(Path.Combine(outDir, "suggestion_form_rendered.png"), ImageFormat.Png);
             }
 
+            form.Quitting = true;
             form.Close();
             sugg.Close();
             return 0;

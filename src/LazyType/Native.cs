@@ -15,6 +15,8 @@ internal static class Native
     public const uint SWP_ASYNCWINDOWPOS = 0x4000;
 
     [DllImport("dwmapi.dll")] public static extern int DwmSetWindowAttribute(IntPtr hwnd, int attribute, ref int value, int size);
+    [DllImport("gdi32.dll")] public static extern IntPtr CreateRoundRectRgn(int x1, int y1, int x2, int y2, int cx, int cy);
+    [DllImport("gdi32.dll")] public static extern bool DeleteObject(IntPtr hObject);
     [DllImport("user32.dll", SetLastError = true)] public static extern bool RegisterHotKey(IntPtr hwnd, int id, uint modifiers, uint key);
     [DllImport("user32.dll")] public static extern bool UnregisterHotKey(IntPtr hwnd, int id);
     [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();

@@ -1,4 +1,6 @@
+using System.Drawing;
 using System.Drawing.Drawing2D;
+using System.Windows.Forms;
 
 namespace LazyType;
 
@@ -7,15 +9,13 @@ internal static class DrawingHelpers
     public static GraphicsPath CreateRoundedRectangle(Rectangle bounds, int radius)
     {
         var path = new GraphicsPath();
-        if (bounds.Width <= 0 || bounds.Height <= 0) return path;
-        int d = Math.Min(radius * 2, Math.Min(bounds.Width, bounds.Height));
-        if (d <= 0) { path.AddRectangle(bounds); return path; }
+        int diameter = Math.Max(1, radius * 2);
+        var arc = new Rectangle(bounds.Location, new Size(diameter, diameter));
 
-        var arc = new Rectangle(bounds.X, bounds.Y, d, d);
         path.AddArc(arc, 180, 90);
-        arc.X = bounds.Right - d;
+        arc.X = bounds.Right - diameter;
         path.AddArc(arc, 270, 90);
-        arc.Y = bounds.Bottom - d;
+        arc.Y = bounds.Bottom - diameter;
         path.AddArc(arc, 0, 90);
         arc.X = bounds.Left;
         path.AddArc(arc, 90, 90);
@@ -25,12 +25,14 @@ internal static class DrawingHelpers
 
     public static void FillRoundedRectangle(Graphics g, Brush brush, Rectangle bounds, int radius)
     {
+        if (bounds.Width <= 0 || bounds.Height <= 0) return;
         using var path = CreateRoundedRectangle(bounds, radius);
         g.FillPath(brush, path);
     }
 
     public static void DrawRoundedRectangle(Graphics g, Pen pen, Rectangle bounds, int radius)
     {
+        if (bounds.Width <= 0 || bounds.Height <= 0) return;
         using var path = CreateRoundedRectangle(bounds, radius);
         g.DrawPath(pen, path);
     }
@@ -40,44 +42,43 @@ internal static class PolishIcon
 {
     public static void Draw(Graphics g, Rectangle bounds, Color color)
     {
-        using var brush = new SolidBrush(color);
-        Draw(g, bounds, brush);
-    }
-
-    public static void Draw(Graphics g, Rectangle bounds, Brush brush)
-    {
         var prevSmoothing = g.SmoothingMode;
         g.SmoothingMode = SmoothingMode.AntiAlias;
 
-        // Draw dual 4-point sparkle stars
-        // Large star on the left/center
-        float cx1 = bounds.X + bounds.Width * 0.40f;
-        float cy1 = bounds.Y + bounds.Height * 0.58f;
-        float r1 = Math.Min(bounds.Width, bounds.Height) * 0.38f;
-        DrawSparkleStar(g, brush, cx1, cy1, r1);
+        float w = bounds.Width;
+        float h = bounds.Height;
+        float x = bounds.X;
+        float y = bounds.Y;
 
-        // Small star on the top right
-        float cx2 = bounds.X + bounds.Width * 0.76f;
-        float cy2 = bounds.Y + bounds.Height * 0.28f;
-        float r2 = Math.Min(bounds.Width, bounds.Height) * 0.21f;
-        DrawSparkleStar(g, brush, cx2, cy2, r2);
+        using var brush = new SolidBrush(color);
+
+        // Major 4-point sparkle star (upper right/center)
+        float cx1 = x + w * 0.42f;
+        float cy1 = y + h * 0.42f;
+        float r1Outer = Math.Min(w, h) * 0.38f;
+        float r1Inner = r1Outer * 0.22f;
+        DrawFourPointStar(g, brush, cx1, cy1, r1Outer, r1Inner);
+
+        // Minor 4-point sparkle star (lower right)
+        float cx2 = x + w * 0.78f;
+        float cy2 = y + h * 0.78f;
+        float r2Outer = Math.Min(w, h) * 0.20f;
+        float r2Inner = r2Outer * 0.22f;
+        DrawFourPointStar(g, brush, cx2, cy2, r2Outer, r2Inner);
 
         g.SmoothingMode = prevSmoothing;
     }
 
-    private static void DrawSparkleStar(Graphics g, Brush brush, float cx, float cy, float radius)
+    private static void DrawFourPointStar(Graphics g, Brush brush, float cx, float cy, float rOuter, float rInner)
     {
-        if (radius <= 1f) return;
-        using var path = new GraphicsPath();
-        float inner = radius * 0.18f;
-
-        path.AddBezier(cx, cy - radius, cx + inner, cy - inner, cx + inner, cy - inner, cx + radius, cy);
-        path.AddBezier(cx + radius, cy, cx + inner, cy + inner, cx + inner, cy + inner, cx, cy + radius);
-        path.AddBezier(cx, cy + radius, cx - inner, cy + inner, cx - inner, cy + inner, cx - radius, cy);
-        path.AddBezier(cx - radius, cy, cx - inner, cy - inner, cx - inner, cy - inner, cx, cy - radius);
-        path.CloseFigure();
-
-        g.FillPath(brush, path);
+        PointF[] pts = new PointF[8];
+        for (int i = 0; i < 8; i++)
+        {
+            double angle = (i * Math.PI / 4.0) - (Math.PI / 2.0);
+            float r = (i % 2 == 0) ? rOuter : rInner;
+            pts[i] = new PointF((float)(cx + r * Math.Cos(angle)), (float)(cy + r * Math.Sin(angle)));
+        }
+        g.FillPolygon(brush, pts);
     }
 }
 
@@ -93,7 +94,7 @@ internal static class VectorIcons
         float x = bounds.X;
         float y = bounds.Y;
 
-        float stroke = Math.Max(1.8f, w * 0.08f);
+        float stroke = Math.Max(1.6f, w * 0.08f);
         using var pen = new Pen(color, stroke) { StartCap = LineCap.Round, EndCap = LineCap.Round };
         using var brush = new SolidBrush(color);
 
@@ -178,19 +179,18 @@ internal static class VectorIcons
         var prevSmoothing = g.SmoothingMode;
         g.SmoothingMode = SmoothingMode.AntiAlias;
 
-        float stroke = Math.Max(1.5f, bounds.Width * 0.09f);
+        float stroke = Math.Max(1.4f, bounds.Width * 0.09f);
         using var pen = new Pen(color, stroke);
 
-        int pad = (int)(bounds.Width * 0.15f);
-        int sheetW = (int)(bounds.Width * 0.58f);
-        int sheetH = (int)(bounds.Height * 0.65f);
+        int pad = (int)(bounds.Width * 0.12f);
+        int sheetW = (int)(bounds.Width * 0.56f);
+        int sheetH = (int)(bounds.Height * 0.62f);
 
         var backRect = new Rectangle(bounds.X + bounds.Width - sheetW - pad, bounds.Y + pad, sheetW, sheetH);
         DrawingHelpers.DrawRoundedRectangle(g, pen, backRect, 2);
 
-        using var bgBrush = new SolidBrush(Color.White);
+        using var bgBrush = new SolidBrush(Color.FromArgb(240, 242, 246));
         var frontRect = new Rectangle(bounds.X + pad, bounds.Y + bounds.Height - sheetH - pad, sheetW, sheetH);
-        g.FillRectangle(bgBrush, frontRect);
         DrawingHelpers.DrawRoundedRectangle(g, pen, frontRect, 2);
 
         g.SmoothingMode = prevSmoothing;
@@ -335,7 +335,8 @@ internal sealed class ModernCheckBox : CheckBox
 
     public ModernCheckBox()
     {
-        SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
+        SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw | ControlStyles.SupportsTransparentBackColor, true);
+        BackColor = Color.Transparent;
         Cursor = Cursors.Hand;
         Font = new Font("Segoe UI", 10f);
         Margin = new Padding(0);
@@ -352,9 +353,16 @@ internal sealed class ModernCheckBox : CheckBox
         var g = pevent.Graphics;
         g.SmoothingMode = SmoothingMode.AntiAlias;
 
+        if (Parent != null)
+        {
+            using var pBrush = new SolidBrush(Parent.BackColor);
+            g.FillRectangle(pBrush, ClientRectangle);
+        }
+
         int boxSize = Math.Max(18, (int)(18f * (DeviceDpi / 96f)));
+        int x = (Width - boxSize) / 2;
         int y = (Height - boxSize) / 2;
-        var boxRect = new Rectangle(1, y, boxSize, boxSize);
+        var boxRect = new Rectangle(x, y, boxSize, boxSize);
 
         Color borderNormal = isDark ? Color.FromArgb(71, 84, 103) : Color.FromArgb(208, 213, 221);
         Color borderHover = isDark ? Color.FromArgb(145, 120, 240) : Color.FromArgb(127, 86, 217);
@@ -387,29 +395,43 @@ internal sealed class ModernCheckBox : CheckBox
             using var borderPen = new Pen(currentBorder, 1.5f);
             DrawingHelpers.DrawRoundedRectangle(g, borderPen, boxRect, 4);
         }
-
-        if (!string.IsNullOrEmpty(Text))
-        {
-            int textX = boxRect.Right + Math.Max(8, (int)(8f * (DeviceDpi / 96f)));
-            var textRect = new Rectangle(textX, 0, Width - textX, Height);
-            Color textColor = Enabled ? ForeColor : (isDark ? Color.FromArgb(110, 120, 135) : Color.FromArgb(150, 160, 175));
-            TextRenderer.DrawText(g, Text, Font, textRect, textColor, TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
-        }
     }
 }
 
 internal sealed class WandButton : Button
 {
     private bool hovered, pressed;
+    private bool isDark;
+
+    public bool IsDark
+    {
+        get => isDark;
+        set { isDark = value; Invalidate(); }
+    }
 
     public WandButton()
     {
-        SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer, true);
+        SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.SupportsTransparentBackColor, true);
+        BackColor = Color.Transparent;
         Cursor = Cursors.Hand;
-        BackColor = Color.FromArgb(243, 238, 255);
-        ForeColor = Color.FromArgb(127, 86, 217);
         FlatStyle = FlatStyle.Flat;
         FlatAppearance.BorderSize = 0;
+    }
+
+    protected override void OnResize(EventArgs e)
+    {
+        base.OnResize(e);
+        UpdateRegion();
+    }
+
+    private void UpdateRegion()
+    {
+        if (Width > 0 && Height > 0)
+        {
+            using var path = new GraphicsPath();
+            path.AddEllipse(0, 0, Width, Height);
+            Region = new Region(path);
+        }
     }
 
     protected override void OnMouseEnter(EventArgs e) { hovered = true; Invalidate(); base.OnMouseEnter(e); }
@@ -422,17 +444,24 @@ internal sealed class WandButton : Button
         var g = pevent.Graphics;
         g.SmoothingMode = SmoothingMode.AntiAlias;
 
+        if (Parent != null)
+        {
+            using var pBrush = new SolidBrush(Parent.BackColor);
+            g.FillRectangle(pBrush, ClientRectangle);
+        }
+
         var bounds = ClientRectangle;
-        Color bg = BackColor;
-        if (pressed) bg = Color.FromArgb(Math.Max(0, bg.R - 25), Math.Max(0, bg.G - 25), Math.Max(0, bg.B - 25));
-        else if (hovered) bg = Color.FromArgb(Math.Min(255, bg.R + 10), Math.Min(255, bg.G + 10), Math.Min(255, bg.B + 10));
+        Color bg = isDark
+            ? (pressed ? Color.FromArgb(48, 36, 80) : hovered ? Color.FromArgb(75, 58, 120) : Color.FromArgb(60, 46, 96))
+            : (pressed ? Color.FromArgb(225, 215, 250) : hovered ? Color.FromArgb(250, 245, 255) : Color.FromArgb(243, 238, 255));
+        Color fg = isDark ? Color.FromArgb(195, 170, 255) : Color.FromArgb(127, 86, 217);
 
         using var brush = new SolidBrush(bg);
-        DrawingHelpers.FillRoundedRectangle(g, brush, bounds, Math.Min(bounds.Width, bounds.Height) / 2);
+        g.FillEllipse(brush, 0, 0, bounds.Width - 1, bounds.Height - 1);
 
         int iconPadding = Math.Max(6, (int)(bounds.Width * 0.22f));
         var iconRect = new Rectangle(bounds.X + iconPadding, bounds.Y + iconPadding, bounds.Width - iconPadding * 2, bounds.Height - iconPadding * 2);
-        PolishIcon.Draw(g, iconRect, Enabled ? ForeColor : Color.FromArgb(160, 160, 160));
+        PolishIcon.Draw(g, iconRect, Enabled ? fg : (isDark ? Color.FromArgb(90, 80, 110) : Color.FromArgb(180, 175, 195)));
     }
 }
 
@@ -453,11 +482,27 @@ internal sealed class ModernButton : Button
 
     public ModernButton()
     {
-        SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer, true);
+        SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.SupportsTransparentBackColor, true);
+        BackColor = Color.Transparent;
         Cursor = Cursors.Hand;
         Font = new Font("Segoe UI", 9.5f, FontStyle.Regular);
         FlatStyle = FlatStyle.Flat;
         FlatAppearance.BorderSize = 0;
+    }
+
+    protected override void OnResize(EventArgs e)
+    {
+        base.OnResize(e);
+        UpdateRegion();
+    }
+
+    private void UpdateRegion()
+    {
+        if (Width > 0 && Height > 0)
+        {
+            using var path = DrawingHelpers.CreateRoundedRectangle(new Rectangle(0, 0, Width, Height), CornerRadius);
+            Region = new Region(path);
+        }
     }
 
     protected override void OnMouseEnter(EventArgs e) { hovered = true; Invalidate(); base.OnMouseEnter(e); }
@@ -469,6 +514,12 @@ internal sealed class ModernButton : Button
     {
         var g = pevent.Graphics;
         g.SmoothingMode = SmoothingMode.AntiAlias;
+
+        if (Parent != null)
+        {
+            using var parentBrush = new SolidBrush(Parent.BackColor);
+            g.FillRectangle(parentBrush, ClientRectangle);
+        }
 
         var bounds = new Rectangle(0, 0, Width - 1, Height - 1);
         Color bg, fg, border = Color.Transparent;
@@ -507,20 +558,32 @@ internal sealed class ModernButton : Button
             DrawingHelpers.DrawRoundedRectangle(g, borderPen, bounds, CornerRadius);
         }
 
-        int contentX = bounds.X + 12;
-        if (IconDrawAction != null)
+        bool hasIcon = IconDrawAction != null;
+        bool hasText = !string.IsNullOrEmpty(Text);
+
+        if (hasIcon && !hasText)
         {
             int iconSize = Math.Min(18, bounds.Height - 8);
+            int iconX = bounds.X + (bounds.Width - iconSize) / 2;
             int iconY = bounds.Y + (bounds.Height - iconSize) / 2;
-            int iconX = string.IsNullOrEmpty(Text) ? bounds.X + (bounds.Width - iconSize) / 2 : bounds.X + 10;
-            IconDrawAction(g, new Rectangle(iconX, iconY, iconSize, iconSize), fg);
-            contentX = iconX + iconSize + 8;
+            IconDrawAction!(g, new Rectangle(iconX, iconY, iconSize, iconSize), fg);
         }
-
-        if (!string.IsNullOrEmpty(Text))
+        else if (hasIcon && hasText)
         {
-            var textRect = new Rectangle(contentX, bounds.Y, bounds.Right - contentX - 8, bounds.Height);
-            TextRenderer.DrawText(g, Text, Font, textRect, fg, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
+            int iconSize = Math.Min(15, bounds.Height - 12);
+            int iconY = bounds.Y + (bounds.Height - iconSize) / 2;
+            var textSize = TextRenderer.MeasureText(Text, Font);
+            int totalW = iconSize + 6 + textSize.Width;
+            int startX = Math.Max(8, (bounds.Width - totalW) / 2);
+
+            IconDrawAction!(g, new Rectangle(startX, iconY, iconSize, iconSize), fg);
+            int textX = startX + iconSize + 6;
+            var textRect = new Rectangle(textX, bounds.Y, bounds.Width - textX - 4, bounds.Height);
+            TextRenderer.DrawText(g, Text, Font, textRect, fg, TextFormatFlags.Left | TextFormatFlags.VerticalCenter);
+        }
+        else if (hasText)
+        {
+            TextRenderer.DrawText(g, Text, Font, bounds, fg, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
         }
     }
 }

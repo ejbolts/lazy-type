@@ -111,13 +111,19 @@ internal sealed class SuggestionForm : Form
         TopMost = true;
         DoubleBuffered = true;
         KeyPreview = true;
-        Size = new Size(420, 240);
-        Padding = new Padding(16);
+        Size = new Size(440, 240);
+        Padding = new Padding(16, 14, 16, 14);
 
         // Header panel
         headerPanel.Dock = DockStyle.Top;
         headerPanel.Height = 32;
         headerPanel.Cursor = Cursors.SizeAll;
+        headerPanel.Paint += (_, pe) =>
+        {
+            pe.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+            var iconRect = new Rectangle(2, 6, 20, 20);
+            PolishIcon.Draw(pe.Graphics, iconRect, Color.FromArgb(127, 86, 217));
+        };
         headerPanel.MouseDown += (_, e) =>
         {
             if (e.Button == MouseButtons.Left)
@@ -130,7 +136,8 @@ internal sealed class SuggestionForm : Form
         title.Text = "A little polish";
         title.Font = new Font("Segoe UI", 11.5f, FontStyle.Bold);
         title.AutoSize = false;
-        title.SetBounds(26, 3, 260, 26);
+        title.SetBounds(28, 4, 260, 24);
+        title.BackColor = Color.Transparent;
         title.Cursor = Cursors.SizeAll;
         title.MouseDown += (_, e) =>
         {
@@ -173,21 +180,21 @@ internal sealed class SuggestionForm : Form
         contentCard.Controls.Add(suggestion);
 
         // Action row
-        var actionPanel = new Panel { Dock = DockStyle.Bottom, Height = 42, Padding = new Padding(0, 8, 0, 0) };
+        var actionPanel = new Panel { Dock = DockStyle.Bottom, Height = 44, Padding = new Padding(0, 6, 0, 0) };
 
         apply.Text = "Apply suggestion";
         apply.Style = ModernButton.ButtonStyle.Primary;
-        apply.SetBounds(0, 6, 148, 34);
+        apply.SetBounds(0, 6, 154, 34);
         apply.Click += (_, _) => ApplyRequested?.Invoke();
 
         keep.Text = "Keep original";
         keep.Style = ModernButton.ButtonStyle.Secondary;
-        keep.SetBounds(154, 6, 115, 34);
+        keep.SetBounds(162, 6, 120, 34);
         keep.Click += (_, _) => Close();
 
         copy.Text = "Copy";
         copy.Style = ModernButton.ButtonStyle.Secondary;
-        copy.SetBounds(275, 6, 80, 34);
+        copy.SetBounds(290, 6, 96, 34);
         copy.IconDrawAction = (g, rect, col) => VectorIcons.DrawCopy(g, rect, col);
         copy.Click += (_, _) =>
         {
@@ -220,6 +227,30 @@ internal sealed class SuggestionForm : Form
         ApplyTheme(isDark);
     }
 
+    private void UpdateRegion()
+    {
+        if (Width > 0 && Height > 0)
+        {
+            var hRgn = Native.CreateRoundRectRgn(0, 0, Width + 1, Height + 1, 18, 18);
+            Region = Region.FromHrgn(hRgn);
+            Native.DeleteObject(hRgn);
+        }
+    }
+
+    protected override void OnHandleCreated(EventArgs e)
+    {
+        base.OnHandleCreated(e);
+        int cornerPref = 2; // DWMWCP_ROUND
+        Native.DwmSetWindowAttribute(Handle, 33 /* DWMWA_WINDOW_CORNER_PREFERENCE */, ref cornerPref, sizeof(int));
+        UpdateRegion();
+    }
+
+    protected override void OnResize(EventArgs e)
+    {
+        base.OnResize(e);
+        UpdateRegion();
+    }
+
     public void ShowSuggestion(string text, bool changed, bool canApply)
     {
         suggestion.Text = text;
@@ -245,8 +276,9 @@ internal sealed class SuggestionForm : Form
     {
         using var g = suggestion.CreateGraphics();
         var size = TextRenderer.MeasureText(g, suggestion.Text, suggestion.Font, new Size(contentCard.Width - 30, int.MaxValue), TextFormatFlags.WordBreak);
-        int needed = Math.Clamp(size.Height + 160, 220, 480);
+        int needed = Math.Clamp(size.Height + 155, 210, 480);
         Height = needed;
+        UpdateRegion();
         Invalidate();
     }
 
@@ -270,6 +302,7 @@ internal sealed class SuggestionForm : Form
         keep.IsDark = dark;
         copy.IsDark = dark;
 
+        headerPanel.BackColor = Color.Transparent;
         Invalidate();
     }
 
@@ -281,15 +314,11 @@ internal sealed class SuggestionForm : Form
 
         // Window border
         var bounds = new Rectangle(0, 0, Width - 1, Height - 1);
-        Color borderColor = isDark ? Color.FromArgb(65, 55, 95) : Color.FromArgb(220, 215, 235);
+        Color borderColor = isDark ? Color.FromArgb(68, 55, 98) : Color.FromArgb(215, 205, 235);
         using (var borderPen = new Pen(borderColor, 1.5f))
         {
-            DrawingHelpers.DrawRoundedRectangle(g, borderPen, bounds, 12);
+            DrawingHelpers.DrawRoundedRectangle(g, borderPen, bounds, 16);
         }
-
-        // Draw dual stars polish icon in header
-        var iconRect = new Rectangle(16, 17, 20, 20);
-        PolishIcon.Draw(g, iconRect, Color.FromArgb(127, 86, 217));
 
         // Draw rounded border around suggestion card
         var cardBounds = new Rectangle(contentCard.Left, contentCard.Top, contentCard.Width - 1, contentCard.Height - 1);

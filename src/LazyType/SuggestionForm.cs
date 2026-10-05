@@ -290,7 +290,7 @@ internal sealed class SuggestionForm : Form
         var edits = parts.Where((part, i) => !string.IsNullOrWhiteSpace(part.Text)
             && (part.Kind == DiffKind.Removed || (part.Kind == DiffKind.Added && (i == 0 || parts[i - 1].Kind != DiffKind.Removed)))).Count();
         subtitle.Text = !changed ? (inline ? "Looks good · no changes needed" : "No changes needed")
-            : inline ? $"{edits} {(edits == 1 ? "change" : "changes")} marked in your text" : "Suggested changes";
+            : inline ? $"{edits} {(edits == 1 ? "change" : "changes")} marked · click a label to apply just that one" : "Suggested changes";
         details.Text = "Show wording";
         details.Visible = inline && changed;
         apply.Enabled = canApply && changed;

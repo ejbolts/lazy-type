@@ -6,7 +6,8 @@ internal enum DiffKind { Equal, Removed, Added }
 internal readonly record struct DiffPart(DiffKind Kind, string Text);
 internal readonly record struct TextSpan(int Start, int Length);
 // Struck marks remove Span (and show Added in its place); insertions show Added before or after the Span word.
-internal readonly record struct ChangeMark(TextSpan Span, bool Struck, string? Added, bool Before);
+// Part is the index of the comparison part the mark applies: the removed part, or the added part of an insertion.
+internal readonly record struct ChangeMark(TextSpan Span, bool Struck, string? Added, bool Before, int Part);
 
 // Word-level comparison of the original and suggested wording, so only what a suggestion changes is marked.
 internal static class TextDiff
@@ -91,18 +92,30 @@ internal static class TextDiff
             {
                 var replaced = i > 0 && parts[i - 1].Kind == DiffKind.Removed && !string.IsNullOrWhiteSpace(parts[i - 1].Text);
                 if (!replaced && !string.IsNullOrWhiteSpace(part.Text) && NearestWord(original, offset) is { } word)
-                    marks.Add(new ChangeMark(word, false, part.Text.Trim(), word.Start >= offset));
+                    marks.Add(new ChangeMark(word, false, part.Text.Trim(), word.Start >= offset, i));
                 continue;
             }
             if (part.Kind == DiffKind.Removed && !string.IsNullOrWhiteSpace(part.Text))
             {
                 var start = offset + (part.Text.Length - part.Text.TrimStart().Length);
                 var added = i + 1 < parts.Count && parts[i + 1].Kind == DiffKind.Added ? parts[i + 1].Text.Trim() : null;
-                marks.Add(new ChangeMark(new TextSpan(start, part.Text.Trim().Length), true, string.IsNullOrEmpty(added) ? null : added, false));
+                marks.Add(new ChangeMark(new TextSpan(start, part.Text.Trim().Length), true, string.IsNullOrEmpty(added) ? null : added, false, i));
             }
             offset += part.Text.Length;
         }
         return marks;
+    }
+
+    // The original text with just one change applied; every other part keeps the original wording.
+    public static string ApplyOne(IReadOnlyList<DiffPart> parts, ChangeMark mark)
+    {
+        var text = new System.Text.StringBuilder();
+        for (var i = 0; i < parts.Count; i++)
+        {
+            var chosen = i == mark.Part || (mark.Struck && i == mark.Part + 1 && parts[i].Kind == DiffKind.Added);
+            if (parts[i].Kind == DiffKind.Equal || (parts[i].Kind == DiffKind.Removed) != chosen) text.Append(parts[i].Text);
+        }
+        return text.ToString();
     }
 
     private static TextSpan? NearestWord(string text, int position)

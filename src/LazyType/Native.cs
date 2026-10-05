@@ -171,14 +171,20 @@ internal sealed class TextTarget
         catch { return false; }
     }
     // True when both ends of the line hit-test to the field's window, so a marker never draws over another app.
-    // Click-through layered windows, such as the marker itself, are skipped by hit-testing.
-    public bool IsUncovered(Rectangle line)
+    // Click-through layered windows, such as the marker itself, are skipped by hit-testing; our own label
+    // window (ignore) can sit over the field and is treated as see-through.
+    public bool IsUncovered(Rectangle line, IntPtr ignore = default)
     {
         var y = line.Top + line.Height / 2;
         var inset = Math.Min(4, line.Width / 2);
-        return OwnsPoint(line.Left + inset, y) && OwnsPoint(line.Right - 1 - inset, y);
+        return OwnsPoint(line.Left + inset, y, ignore) && OwnsPoint(line.Right - 1 - inset, y, ignore);
     }
-    private bool OwnsPoint(int x, int y) => Window != IntPtr.Zero && Native.GetAncestor(Native.WindowFromPoint(new Native.POINT { X = x, Y = y }), 2 /* GA_ROOT */) == Window;
+    private bool OwnsPoint(int x, int y, IntPtr ignore)
+    {
+        if (Window == IntPtr.Zero) return false;
+        var root = Native.GetAncestor(Native.WindowFromPoint(new Native.POINT { X = x, Y = y }), 2 /* GA_ROOT */);
+        return root == Window || (ignore != IntPtr.Zero && root == ignore);
+    }
     // Screen bounds of each visible line of the dictation, clipped to the field. Empty once the field changes.
     public Rectangle[] InsertionLineBounds() => Bounds(null)?[0] ?? Array.Empty<Rectangle>();
     // Line bounds for each span of the dictation, in order. Null once the field changes; an entry is empty

@@ -162,8 +162,12 @@ internal static class SelfTest
             }
             var marked = TextDiff.Marks("yeah okay i checked", TextDiff.Compare("yeah okay i checked", "Yeah, okay, I checked"));
             var inserted = TextDiff.Marks("send it today", TextDiff.Compare("send it today", "Please send it today"));
-            if (!marked.SequenceEqual(new[] { new ChangeMark(new TextSpan(0, 4), true, "Yeah,", false), new ChangeMark(new TextSpan(10, 1), true, ", I", false) })
-                || !inserted.SequenceEqual(new[] { new ChangeMark(new TextSpan(0, 4), false, "Please", true) })
+            var markedParts = TextDiff.Compare("yeah okay i checked", "Yeah, okay, I checked");
+            if (!marked.SequenceEqual(new[] { new ChangeMark(new TextSpan(0, 4), true, "Yeah,", false, 0), new ChangeMark(new TextSpan(10, 1), true, ", I", false, 3) })
+                || !inserted.SequenceEqual(new[] { new ChangeMark(new TextSpan(0, 4), false, "Please", true, 0) })
+                || TextDiff.ApplyOne(markedParts, marked[1]) != "yeah okay, I checked"
+                || TextDiff.ApplyOne(markedParts, marked[0]) != "Yeah, okay i checked"
+                || TextDiff.ApplyOne(TextDiff.Compare("send it today", "Please send it today"), inserted[0]) != "Please send it today"
                 || TextDiff.HasChanges(TextDiff.Compare("Same text.", "Same text. "))
                 || TextDiff.Marks("Same text.", TextDiff.Compare("Same text.", "Same text.")).Count != 0) throw new Exception("Suggestion change marking failed.");
             if (JsonSerializer.Deserialize<AppSettings>("{}")!.Suggestions

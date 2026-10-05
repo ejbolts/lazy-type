@@ -20,6 +20,8 @@ internal static class Native
     [DllImport("user32.dll", SetLastError = true)] public static extern bool RegisterHotKey(IntPtr hwnd, int id, uint modifiers, uint key);
     [DllImport("user32.dll")] public static extern bool UnregisterHotKey(IntPtr hwnd, int id);
     [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll")] public static extern IntPtr WindowFromPoint(POINT point);
+    [DllImport("user32.dll")] public static extern IntPtr GetAncestor(IntPtr hwnd, uint flags);
     [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hwnd);
     [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint processId);
     [DllImport("user32.dll")] public static extern short GetAsyncKeyState(int key);
@@ -96,6 +98,9 @@ internal sealed class TextTarget
     private int[]? runtimeId;
     private bool protectedField;
     private string? insertedText, documentSnapshot;
+    private TextPatternRange? insertionRange;
+    private IReadOnlyList<TextSpan>? markedSpans;
+    private TextPatternRange?[]? markedRanges;
     public static TextTarget Capture()
     {
         var target = new TextTarget { Window = Native.GetForegroundWindow() };
@@ -144,7 +149,7 @@ internal sealed class TextTarget
     // Unsupported editors still offer a copyable preview.
     public void RememberInsertion(string text)
     {
-        insertedText = null; documentSnapshot = null;
+        insertedText = null; documentSnapshot = null; insertionRange = null; markedRanges = null;
         try
         {
             var pattern = TextPattern();
@@ -165,6 +170,63 @@ internal sealed class TextTarget
         try { return insertedText != null && documentSnapshot != null && TextPattern()?.DocumentRange.GetText(32001) == documentSnapshot; }
         catch { return false; }
     }
+    // True when both ends of the line hit-test to the field's window, so a marker never draws over another app.
+    // Click-through layered windows, such as the marker itself, are skipped by hit-testing.
+    public bool IsUncovered(Rectangle line)
+    {
+        var y = line.Top + line.Height / 2;
+        var inset = Math.Min(4, line.Width / 2);
+        return OwnsPoint(line.Left + inset, y) && OwnsPoint(line.Right - 1 - inset, y);
+    }
+    private bool OwnsPoint(int x, int y) => Window != IntPtr.Zero && Native.GetAncestor(Native.WindowFromPoint(new Native.POINT { X = x, Y = y }), 2 /* GA_ROOT */) == Window;
+    // Screen bounds of each visible line of the dictation, clipped to the field. Empty once the field changes.
+    public Rectangle[] InsertionLineBounds() => Bounds(null)?[0] ?? Array.Empty<Rectangle>();
+    // Line bounds for each span of the dictation, in order. Null once the field changes; an entry is empty
+    // when the editor cannot locate that span.
+    public Rectangle[][]? SpanBounds(IReadOnlyList<TextSpan> spans) => Bounds(spans);
+    private Rectangle[][]? Bounds(IReadOnlyList<TextSpan>? spans)
+    {
+        try
+        {
+            if (!CanReplaceInsertion()) return null;
+            insertionRange ??= TextPattern()?.DocumentRange.FindText(insertedText!, false, false);
+            if (insertionRange == null || insertionRange.GetText(-1) != insertedText) { insertionRange = null; markedRanges = null; return null; }
+            if (spans != null && (markedRanges == null || !ReferenceEquals(spans, markedSpans)))
+            {
+                markedSpans = spans;
+                markedRanges = spans.Select(SpanRange).ToArray();
+            }
+            var ranges = spans == null ? new TextPatternRange?[] { insertionRange } : markedRanges!;
+            var field = element!.Current.BoundingRectangle;
+            return ranges.Select(range => range == null ? Array.Empty<Rectangle>() : ClipLines(range.GetBoundingRectangles(), field)).ToArray();
+        }
+        catch { insertionRange = null; markedRanges = null; return null; }
+    }
+    // Screen bounds of every visible line of text in the field, so labels can avoid covering neighbouring lines.
+    public Rectangle[] TextLineBounds()
+    {
+        try
+        {
+            var pattern = TextPattern();
+            return pattern == null ? Array.Empty<Rectangle>() : ClipLines(pattern.DocumentRange.GetBoundingRectangles(), element!.Current.BoundingRectangle);
+        }
+        catch { return Array.Empty<Rectangle>(); }
+    }
+    private static Rectangle[] ClipLines(IEnumerable<System.Windows.Rect> lines, System.Windows.Rect field) => lines
+        .Select(line => System.Windows.Rect.Intersect(line, field))
+        .Where(line => !line.IsEmpty && line.Width >= 1 && line.Height >= 4)
+        .Select(line => Rectangle.FromLTRB((int)Math.Floor(line.Left), (int)Math.Floor(line.Top), (int)Math.Ceiling(line.Right), (int)Math.Ceiling(line.Bottom)))
+        .ToArray();
+    // A range for part of the dictation, used only if the editor reports exactly the expected text.
+    private TextPatternRange? SpanRange(TextSpan span)
+    {
+        if (span.Start < 0 || span.Length <= 0 || span.Start + span.Length > insertedText!.Length) return null;
+        var range = insertionRange!.Clone();
+        range.MoveEndpointByRange(TextPatternRangeEndpoint.End, range, TextPatternRangeEndpoint.Start);
+        if (range.MoveEndpointByUnit(TextPatternRangeEndpoint.End, TextUnit.Character, span.Start + span.Length) != span.Start + span.Length) return null;
+        if (range.MoveEndpointByUnit(TextPatternRangeEndpoint.Start, TextUnit.Character, span.Start) != span.Start) return null;
+        return range.GetText(-1) == insertedText.Substring(span.Start, span.Length) ? range : null;
+    }
     public async Task<bool> ReplaceInsertionAsync(string text, CancellationToken ct)
     {
         if (!CanReplaceInsertion()) return false;
@@ -184,9 +246,10 @@ internal sealed class TextTarget
                 try
                 {
                     var selected = pattern.GetSelection();
+                    // Chrome can report a different end position for the same text, so check the start and the exact selected text.
                     return CanReplaceInsertion() && selected.Length == 1
                         && selected[0].CompareEndpoints(TextPatternRangeEndpoint.Start, range, TextPatternRangeEndpoint.Start) == 0
-                        && selected[0].CompareEndpoints(TextPatternRangeEndpoint.End, range, TextPatternRangeEndpoint.End) == 0;
+                        && selected[0].GetText(insertedText!.Length + 1) == insertedText;
                 }
                 catch { return false; }
             }

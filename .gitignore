@@ -17,3 +17,5 @@ Desktop.ini
 .runtime/
 artifacts/
 *.user
+__pycache__/
+*.pyc

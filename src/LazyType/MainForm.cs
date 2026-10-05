@@ -18,6 +18,7 @@ internal sealed class MainForm : Form
     public readonly ModernCheckBox Clean = new();
     public readonly ModernCheckBox Suggestions = new();
     public readonly ModernCheckBox Startup = new();
+    public readonly ModelSelector Models = new();
     public readonly ComboBox HotkeyChoice = new();
     public readonly ComboBox ThemeChoice = new();
     public readonly ComboBox PopupThemeChoice = new();
@@ -73,7 +74,7 @@ internal sealed class MainForm : Form
         Controls.Add(root);
 
         // --- 1. Header (Greeting + status dot + explanation) ---
-        var headerPanel = new BufferedPanel { Dock = DockStyle.Top, Height = 64 };
+        var headerPanel = new BufferedPanel { Dock = DockStyle.Top, Height = 72 };
 
         statusDot.SetBounds(0, 8, 12, 12);
         statusDot.Paint += (_, e) =>
@@ -89,7 +90,9 @@ internal sealed class MainForm : Form
 
         statusDetail.Text = "Everything stays on your device.";
         statusDetail.Font = new Font("Segoe UI", 9.5f, FontStyle.Regular);
-        statusDetail.SetBounds(22, 32, 500, 24);
+        statusDetail.SetBounds(22, 32, 500, 32);
+        statusDetail.AutoEllipsis = true;
+        headerPanel.Resize += (_, _) => statusDetail.Width = Math.Max(0, headerPanel.ClientSize.Width - 22);
 
         headerPanel.Controls.Add(statusDot);
         headerPanel.Controls.Add(greeting);
@@ -253,6 +256,8 @@ internal sealed class MainForm : Form
 
         // Assemble root layout
         root.Controls.Add(resultCard);
+        Models.Dock = DockStyle.Top;
+        root.Controls.Add(Models);
         root.Controls.Add(settingsContainer);
         root.Controls.Add(shortcutCard);
         root.Controls.Add(headerPanel);
@@ -269,6 +274,11 @@ internal sealed class MainForm : Form
         Result.TextChanged += (_, _) => UpdateSuggestionButton();
 
         FormClosing += (_, e) => { if (!Quitting) { e.Cancel = true; Hide(); } };
+        Shown += (_, _) =>
+        {
+            var area = Screen.FromControl(this).WorkingArea;
+            if (Height > area.Height) Height = Math.Max(MinimumSize.Height, area.Height);
+        };
     }
 
 
@@ -312,6 +322,7 @@ internal sealed class MainForm : Form
 
         row.Controls.Add(iconBox);
         row.Controls.Add(lblTitle);
+        row.Resize += (_, _) => lblTitle.Width = Math.Max(60, row.ClientSize.Width - labelX - rightControl.Width - 20);
         if (subtitle != null)
         {
             var lblSub = new Label
@@ -457,6 +468,7 @@ internal sealed class MainForm : Form
         Clean.IsDark = dark;
         Suggestions.IsDark = dark;
         Startup.IsDark = dark;
+        Models.ApplyTheme(dark);
 
         Color cardBack = dark ? Color.FromArgb(24, 28, 38) : Color.White;
         editorPanel.BackColor = cardBack;

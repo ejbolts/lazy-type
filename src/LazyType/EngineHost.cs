@@ -15,29 +15,41 @@ internal sealed class EngineHost : IDisposable
     private readonly SemaphoreSlim loading = new(1);
     private readonly ProcessJob job = new();
     private readonly object gate = new();
-    private Process? whisper, llama;
-    private int speechPort, textPort;
-    private string key = Guid.NewGuid().ToString("N");
-    private bool textReady;
-    public bool Ready { get; private set; }
+    private Process? whisper;
+    private int speechPort;
+    private bool speechReady, disposed;
+    private CancellationTokenSource lifetime = new();
+    private readonly TextModelHost textModels;
+    public bool Ready { get { lock (gate) return speechReady && whisper?.HasExited == false && textModels.Ready; } }
     public event Action<string>? Progress;
+    public event Action? TextStateChanged;
+    public string TextStatus => textModels.Status;
+    public string? ActiveTextModel => textModels.ActiveModel;
+    internal int TextWorkerCount => textModels.WorkerCount;
+    internal Task UpgradeTask => textModels.UpgradeTask;
+    public EngineHost()
+    {
+        textModels = new(model => new LlamaWorker(model, http));
+        textModels.StateChanged += () => TextStateChanged?.Invoke();
+    }
+    public void SetTextModel(string? model) => textModels.SetMode(model);
     internal long ModelWorkingSetBytes()
     {
         lock (gate)
         {
-            if (!Ready || whisper == null || llama == null) throw new InvalidOperationException("Both models must be loaded before measuring memory.");
-            whisper.Refresh(); llama.Refresh();
-            return whisper.WorkingSet64 + llama.WorkingSet64;
+            if (!Ready || whisper == null) throw new InvalidOperationException("Both models must be loaded before measuring memory.");
+            whisper.Refresh();
+            return whisper.WorkingSet64 + textModels.WorkingSetBytes;
         }
     }
     public static string SpeechModel => Path.Combine(AppSettings.Root, "models", "whisper-turbo-q5.bin");
-    public static string TextModel => Path.Combine(AppSettings.Root, "models", "qwen3-4b-q4.gguf");
+    public static string TextModel => TextModels.PathFor(TextModels.Current);
     public static string Executable(string engine, string file)
     {
         var folder = Path.Combine(AppSettings.Root, "engines", engine);
         return Directory.Exists(folder) ? Directory.GetFiles(folder, file, SearchOption.AllDirectories).FirstOrDefault() ?? throw new FileNotFoundException("Missing " + file + ". Run scripts/setup_models.py.") : throw new DirectoryNotFoundException("Models are not installed. Run scripts/setup_models.py.");
     }
-    private static int FreePort()
+    internal static int FreePort()
     {
         var listener = new TcpListener(IPAddress.Loopback, 0); listener.Start();
         var port = ((IPEndPoint)listener.LocalEndpoint).Port; listener.Stop(); return port;
@@ -46,73 +58,41 @@ internal sealed class EngineHost : IDisposable
     public Task EnsureTextReadyAsync(CancellationToken ct) => EnsureModelsAsync(false, ct);
     private async Task EnsureModelsAsync(bool includeSpeech, CancellationToken ct)
     {
-        await loading.WaitAsync(ct);
+        CancellationTokenSource captured;
+        lock (gate) { ObjectDisposedException.ThrowIf(disposed, this); captured = lifetime; }
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, captured.Token);
+        ct = linked.Token;
+        await loading.WaitAsync(ct).ConfigureAwait(false);
         try
         {
-            if (llama?.HasExited == false && (!includeSpeech || (Ready && whisper?.HasExited == false))) return;
-            Stop();
-            var loadTimer = Stopwatch.StartNew();
-            foreach (var model in includeSpeech ? new[] { SpeechModel, TextModel } : new[] { TextModel }) if (!File.Exists(model)) throw new FileNotFoundException("A local model is missing. Run scripts/setup_models.py.");
-            ct.ThrowIfCancellationRequested();
-            speechPort = FreePort(); textPort = FreePort(); key = Guid.NewGuid().ToString("N");
+            var timer = Stopwatch.StartNew();
             if (includeSpeech)
             {
-                Progress?.Invoke("Loading speech model…");
-                var speechArgs = new List<string> { "-m", SpeechModel, "--host", "127.0.0.1", "--port", speechPort.ToString(), "-t", "4", "-l", "en", "-bs", "1", "-bo", "1", "-nt", "-fa", "-sns" };
-                var vad = Path.Combine(AppSettings.Root, "models", "silero-vad.bin");
-                if (File.Exists(vad)) speechArgs.AddRange(new[] { "--vad", "-vm", vad });
-                lock (gate) { ct.ThrowIfCancellationRequested(); whisper = Start("whisper", "whisper-server.exe", speechArgs); }
-                await WaitReadyAsync(whisper, $"http://127.0.0.1:{speechPort}/health", ct);
+                Process worker;
+                lock (gate)
+                {
+                    ct.ThrowIfCancellationRequested();
+                    if (whisper?.HasExited != false)
+                    {
+                        if (!File.Exists(SpeechModel)) throw new FileNotFoundException("The speech model is missing. Run scripts/setup_models.py.");
+                        ModelProcess.Kill(whisper); speechReady = false; speechPort = FreePort();
+                        Progress?.Invoke("Loading speech model...");
+                        var args = new List<string> { "-m", SpeechModel, "--host", "127.0.0.1", "--port", speechPort.ToString(), "-t", "4", "-l", "en", "-bs", "1", "-bo", "1", "-nt", "-fa", "-sns" };
+                        var vad = Path.Combine(AppSettings.Root, "models", "silero-vad.bin");
+                        if (File.Exists(vad)) args.AddRange(new[] { "--vad", "-vm", vad });
+                        whisper = ModelProcess.Start("whisper", "whisper-server.exe", args, job, () => !speechReady);
+                    }
+                    worker = whisper;
+                }
+                await ModelProcess.WaitReadyAsync(http, worker, $"http://127.0.0.1:{speechPort}/health", ct).ConfigureAwait(false);
+                lock (gate) { ct.ThrowIfCancellationRequested(); speechReady = true; }
             }
-            Progress?.Invoke("Loading cleanup model…");
-            lock (gate)
-            {
-                ct.ThrowIfCancellationRequested();
-                llama = Start("llama", "llama-server.exe", new[] { "-m", TextModel, "--host", "127.0.0.1", "--port", textPort.ToString(), "-ngl", "99", "-c", "4096", "-np", "1", "-t", "4", "-b", "256", "-ub", "128", "--load-mode", "none", "--api-key", key, "--no-webui" });
-            }
-            await WaitReadyAsync(llama, $"http://127.0.0.1:{textPort}/health", ct);
-            ct.ThrowIfCancellationRequested(); textReady = true; Ready = includeSpeech;
-            AppLog.Write($"Local {(includeSpeech ? "speech and text models" : "text model")} ready in {loadTimer.Elapsed.TotalSeconds:F2}s.");
-        }
-        catch { Stop(); throw; }
-        finally { loading.Release(); }
-    }
-    private Process Start(string engine, string filename, IEnumerable<string> args)
-    {
-        var exe = Executable(engine, filename);
-        var info = new ProcessStartInfo(exe) { WorkingDirectory = Path.GetDirectoryName(exe)!, CreateNoWindow = true, UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true };
-        foreach (var arg in args) info.ArgumentList.Add(arg);
-        var process = new Process { StartInfo = info };
-        // Drain output without storing dictated text; keep only load/device diagnostics.
-        var diagnostics = new Queue<string>();
-        void Output(object sender, DataReceivedEventArgs e)
-        {
-            if (e.Data != null && !textReady && (e.Data.Contains("CUDA") || e.Data.Contains("buffer size") || e.Data.Contains("error", StringComparison.OrdinalIgnoreCase)))
-                lock (diagnostics) { if (diagnostics.Count < 40) { diagnostics.Enqueue(e.Data); AppLog.Write(engine + ": " + e.Data); } }
-        }
-        process.OutputDataReceived += Output; process.ErrorDataReceived += Output;
-        process.Start(); job.Add(process); process.BeginOutputReadLine(); process.BeginErrorReadLine();
-        try { process.PriorityClass = ProcessPriorityClass.BelowNormal; } catch { }
-        return process;
-    }
-    private async Task WaitReadyAsync(Process process, string url, CancellationToken ct)
-    {
-        var timer = Stopwatch.StartNew();
-        while (timer.Elapsed < TimeSpan.FromMinutes(3))
-        {
+            await textModels.EnsureReadyAsync(ct).ConfigureAwait(false);
             ct.ThrowIfCancellationRequested();
-            if (process.HasExited) throw new InvalidOperationException("A model could not start (exit " + process.ExitCode + "). See the local app.log for device diagnostics.");
-            try
-            {
-                using var ping = CancellationTokenSource.CreateLinkedTokenSource(ct); ping.CancelAfter(1500);
-                using var response = await http.GetAsync(url, ping.Token);
-                if (response.IsSuccessStatusCode) return;
-            }
-            catch (OperationCanceledException) when (!ct.IsCancellationRequested) { }
-            catch (HttpRequestException) { }
-            await Task.Delay(300, ct);
+            AppLog.Write($"Local {(includeSpeech ? "speech and text models" : "text model")} ready in {timer.Elapsed.TotalSeconds:F2}s.");
         }
-        throw new TimeoutException("Loading the local models took too long. Pause and resume to retry.");
+        catch { Stop(captured); throw; }
+        finally { loading.Release(); }
     }
     public async Task<string> TranscribeAsync(byte[] wav, CancellationToken ct)
     {
@@ -135,11 +115,13 @@ internal sealed class EngineHost : IDisposable
     internal static string CleanPauseDashes(string text)
     {
         if (string.IsNullOrWhiteSpace(text)) return text;
-        text = System.Text.RegularExpressions.Regex.Replace(text, @"[,;:]\s*[—―]+\s*|[\s—―]+\s*[,;:]", ", ");
-        text = System.Text.RegularExpressions.Regex.Replace(text, @"\s*[—―]+\s*([.?!])", "$1");
-        text = System.Text.RegularExpressions.Regex.Replace(text, @"([.?!])\s*[—―]+\s*", "$1 ");
-        text = System.Text.RegularExpressions.Regex.Replace(text, @"(?m)^[\s—―–-]+|[\s—―–-]+$", "");
-        text = System.Text.RegularExpressions.Regex.Replace(text, @"\s*(?:[—―]|---|--|(?<!\d)\s*–\s*(?!\d))\s*", " ");
+        // Horizontal whitespace keeps dictated paragraph breaks intact. Only
+        // standalone ASCII dash runs are pauses; preserve CLI flags and ranges.
+        text = System.Text.RegularExpressions.Regex.Replace(text, @"[,;:][ \t]*[\u2014\u2015]+[ \t]*|[ \t]*[\u2014\u2015]+[ \t]*[,;:]", ", ");
+        text = System.Text.RegularExpressions.Regex.Replace(text, @"[ \t]*[\u2014\u2015]+[ \t]*([.?!])", "$1");
+        text = System.Text.RegularExpressions.Regex.Replace(text, @"([.?!])[ \t]*[\u2014\u2015]+[ \t]*", "$1 ");
+        text = System.Text.RegularExpressions.Regex.Replace(text, @"(?m)^[ \t\u2014\u2015\u2013]+|[ \t\u2014\u2015\u2013]+$", "");
+        text = System.Text.RegularExpressions.Regex.Replace(text, @"[ \t]*(?:[\u2014\u2015]|(?<!\S)-{2,}(?!\S)|(?<!\d)\u2013(?!\d))[ \t]*", " ");
         text = System.Text.RegularExpressions.Regex.Replace(text, @" +([,;:?!.])", "$1");
         text = System.Text.RegularExpressions.Regex.Replace(text, @"[ ]{2,}", " ");
         return text.Trim();
@@ -150,8 +132,12 @@ internal sealed class EngineHost : IDisposable
     {
         if (suggestion && (string.IsNullOrWhiteSpace(raw) || raw.Length > 6000))
             throw new InvalidOperationException("Suggestions work with up to 6,000 characters. Shorten the result and try again.");
-        using var request = new HttpRequestMessage(HttpMethod.Post, $"http://127.0.0.1:{textPort}/v1/chat/completions");
-        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", key);
+        using var lease = textModels.Acquire();
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, lease.SessionToken);
+        ct = linked.Token;
+        ct.ThrowIfCancellationRequested();
+        using var request = new HttpRequestMessage(HttpMethod.Post, lease.Worker.Url + "/v1/chat/completions");
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", lease.Worker.Key);
         request.Content = JsonContent.Create(new {
             messages = new[] {
                 new { role = "system", content = prompt },
@@ -162,6 +148,7 @@ internal sealed class EngineHost : IDisposable
                 new { role = "user", content = JsonSerializer.Serialize(new { dictation = raw }) }
             },
             response_format = new { type = "json_schema", json_schema = new { name = "dictation", strict = true, schema = new { type = "object", properties = new { text = new { type = "string" } }, required = new[] { "text" }, additionalProperties = false } } },
+            chat_template_kwargs = new { enable_thinking = false },
             temperature = 0.0, max_tokens = Math.Clamp(raw.Length / 2 + 128, 256, 2048), stream = false });
         using var response = await http.SendAsync(request, ct); response.EnsureSuccessStatusCode();
         using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync(ct));
@@ -183,18 +170,26 @@ internal sealed class EngineHost : IDisposable
         static IEnumerable<string> Numbers(string value) => System.Text.RegularExpressions.Regex.Matches(value, @"\d+(?:[.,:/-]\d+)*").Select(m => m.Value).OrderBy(n => n, StringComparer.Ordinal);
         return Numbers(raw).SequenceEqual(Numbers(text));
     }
-    public void Stop()
+    public void Stop() => Stop(null);
+    private void Stop(CancellationTokenSource? expected)
     {
         lock (gate)
         {
-            var hadWorkers = whisper != null || llama != null;
-            var unloadTimer = Stopwatch.StartNew();
-            Ready = false; textReady = false;
-            foreach (var process in new[] { whisper, llama })
-                if (process != null) try { if (!process.HasExited) { process.Kill(true); process.WaitForExit(5000); } process.Dispose(); } catch { }
-            whisper = null; llama = null;
-            if (hadWorkers) AppLog.Write($"Model workers unloaded in {unloadTimer.Elapsed.TotalSeconds:F2}s.");
+            if (expected != null && lifetime != expected) return;
+            var timer = Stopwatch.StartNew();
+            var previous = lifetime; lifetime = new(); previous.Cancel();
+            speechReady = false;
+            textModels.Stop();
+            ModelProcess.Kill(whisper); whisper = null;
+            AppLog.Write($"Model workers unloaded in {timer.Elapsed.TotalSeconds:F2}s.");
         }
     }
-    public void Dispose() { Stop(); job.Dispose(); http.Dispose(); }
+    public void Dispose()
+    {
+        lock (gate)
+        {
+            if (disposed) return;
+            disposed = true; Stop(); textModels.Dispose(); job.Dispose(); http.Dispose();
+        }
+    }
 }

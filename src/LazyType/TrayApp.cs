@@ -320,7 +320,8 @@ internal sealed class TrayApp : ApplicationContext
         {
             if (suggestionForm != preview) return;
             suggestionForm = null;
-            if (suggesting) Cancel();
+            // Keep original or the close button: stop any check and clear the marks in the field.
+            if (suggesting) Cancel(); else CloseSuggestion();
         };
         suggestionDestination = destination;
         preview.ApplyRequested += () => _ = ApplySuggestionAsync(preview, destination);

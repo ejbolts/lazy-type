@@ -1,12 +1,14 @@
 # Lazy Type
 
-A Windows tray application for fully local voice dictation, using GPU-accelerated Whisper for speech-to-text and a local Qwen language model to clean up grammar, remove filler words and handle self-corrections.
+Local dictation for Windows with NVIDIA GPUs. Whisper Turbo transcribes your speech, Qwen 3 cleans up grammar and punctuation, and text is inserted into the active application. Processing stays entirely on your PC. Model workers load when needed and release memory when finished.
+
+## Use
 
 1. Press **Ctrl+Alt+Space** (or choose **Ctrl+Shift+Space** or **F8** in the app) to begin speaking.
 2. The speech and language models load on demand the first time you speak, using your NVIDIA GPU.
 3. When you finish speaking, press the hotkey again (or wait for the two-minute limit).
 4. A compact, rounded, translucent indicator follows your mouse pointer and shows recording and microphone level, followed by transcription and cleanup. It stays within the screen's working area and does not take focus. The microphone closes before model processing starts.
-5. After transcription and cleanup, the models unload automatically and your text is pasted into the original field if it is still focused. Otherwise, open Lazy Type and copy the result. Model files remain on disk for the next recording.
+5. After transcription and cleanup, the models unload automatically, your text is copied to the clipboard, and it is pasted into the original field if it is still focused. Model files remain on disk for the next recording.
 
 **Ctrl+Alt+Shift+Space** toggles recording without grammar cleanup. **Escape** cancels an active recording or processing operation and unloads the models. **Ctrl+Alt+Shift+P** pauses/resumes dictation. Pause and Quit release any model workers and their GPU allocations. Resume only arms dictation; models load on the next recording. The dictation hotkey also resumes automatically when paused.
 
@@ -35,7 +37,7 @@ For the alternate Ctrl+Shift+Space hotkey, add Alt for raw dictation. For F8, us
 - Operational logs exclude dictated content. Model files, runtime archives, settings and logs are stored in `%USERPROFILE%\Applications\LazyType`.
 - Model workers are attached to a Windows job so closing/crashing the app also terminates its workers. The app never runs as administrator.
 
-Cleanup can still make mistakes. The original transcript remains available, and any failed or clearly truncated cleanup falls back to it. Check names, numbers and important wording. Password controls are excluded from automatic insertion. Windows can block insertion into elevated applications. Some editors may not expose a distinct focused element, so focus protection is best effort. Clipboard restoration waits for paste handling and does not overwrite newly copied user content.
+Cleanup can still make mistakes. The original transcript remains available, and any failed or clearly truncated cleanup falls back to it. Check names, numbers and important wording. Password controls are excluded from automatic insertion. Windows can block insertion into elevated applications. Some editors may not expose a distinct focused element, so focus protection is best effort. Dictated text is always copied to the clipboard so it remains available to paste anywhere.
 
 ## Build and install
 

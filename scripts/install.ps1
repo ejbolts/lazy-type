@@ -1,10 +1,11 @@
-param([switch]$SkipModels, [switch]$NoLaunch)
+param([switch]$SkipModels, [switch]$NoLaunch,
+    [ValidateSet('current', 'qwen35', 'gemma', 'dynamic', 'all')][string]$TextModel = 'current')
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $installRoot = Join-Path $env:USERPROFILE 'Applications\LazyType'
 $appDir = Join-Path $installRoot 'app'
 if (-not $SkipModels) {
-    & python (Join-Path $PSScriptRoot 'setup_models.py')
+    & python (Join-Path $PSScriptRoot 'setup_models.py') --text-model $TextModel
     if ($LASTEXITCODE -ne 0) { throw 'Model setup failed.' }
 }
 $existing = Join-Path $appDir 'LazyType.exe'

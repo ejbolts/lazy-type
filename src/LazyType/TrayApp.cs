@@ -54,6 +54,16 @@ internal sealed class TrayApp : ApplicationContext
         form.Startup.Checked = !testSession && AppSettings.Startup;
         form.Startup.Enabled = !testSession;
         form.Suggestions.Checked = settings.Suggestions;
+        settings.TextModel = TextModels.Normalize(settings.TextModel);
+        form.Models.SelectedModel = settings.TextModel;
+        engines.SetTextModel(settings.TextModel);
+        form.Models.SelectionChanged += () =>
+        {
+            settings.TextModel = form.Models.SelectedModel;
+            engines.SetTextModel(settings.TextModel);
+            SaveSettings();
+        };
+        engines.TextStateChanged += () => UI(() => form.Models.SetStatus(engines.TextStatus));
         form.HotkeyChoice.SelectedItem = settings.Hotkey;
         if (form.HotkeyChoice.SelectedIndex < 0) form.HotkeyChoice.SelectedIndex = 0;
         form.Mic.SelectedIndexChanged += (_, _) => { settings.Microphone = devices[form.Mic.SelectedIndex].Id; SaveSettings(); };
@@ -91,6 +101,11 @@ internal sealed class TrayApp : ApplicationContext
     }
 
     private void SaveSettings() { if (!testSession) settings.Save(); }
+    private void SetBusy(bool busy)
+    {
+        form.SetSuggestionBusy(busy);
+        form.Models.Enabled = !recording && !processing;
+    }
     private void UI(Action action) { if (!closing && !form.IsDisposed) try { if (form.InvokeRequired) form.BeginInvoke(action); else action(); } catch { } }
     private void Status(string title, string explanation)
     {
@@ -150,7 +165,7 @@ internal sealed class TrayApp : ApplicationContext
         try
         {
             if (paused) Resume();
-            target = TextTarget.Capture();
+            target = testSession ? null : TextTarget.Capture();
             rawMode = raw || !settings.Cleanup;
             if (testAudio == null)
             {
@@ -160,13 +175,13 @@ internal sealed class TrayApp : ApplicationContext
                 next.Start();
             }
             recording = true;
-            form.SetSuggestionBusy(true);
+            SetBusy(true);
             EscapeEnabled(true);
             overlay.Present(testAudio != null ? "Test audio" : rawMode ? "Listening · raw" : "Listening", true);
             Status(testAudio == null ? "Listening" : "Test recording", testAudio == null ? "Microphone on · Press the same hotkey again to stop · 2 minute limit" : "Test fixture selected · Microphone off · Press the same hotkey to process");
             _ = WarmAsync();
         }
-        catch (Exception e) { mic?.Dispose(); mic = null; recording = false; form.SetSuggestionBusy(false); EscapeEnabled(false); overlay.Dismiss(); ReleaseModels(); Report(e); }
+        catch (Exception e) { mic?.Dispose(); mic = null; recording = false; SetBusy(false); EscapeEnabled(false); overlay.Dismiss(); ReleaseModels(); Report(e); }
     }
 
     private async Task FinishRecordingAsync()
@@ -199,7 +214,7 @@ internal sealed class TrayApp : ApplicationContext
                 processing = false; overlay.Dismiss(); EscapeEnabled(false);
                 // Keep the text model loaded and check the wording straight away; it is released afterwards.
                 if (next != null && !ct.IsCancellationRequested && !closing && !paused) _ = SuggestAsync(next, automatic: true);
-                else { ReleaseModels(); form.SetSuggestionBusy(paused); }
+                else { ReleaseModels(); SetBusy(paused); }
             }
         }
     }
@@ -217,7 +232,7 @@ internal sealed class TrayApp : ApplicationContext
         var result = transcript; var fallback = false;
         if (!raw)
         {
-            overlay.Present("Cleaning up…"); Status("Cleaning up your wording", "Microphone off · Qwen is editing locally");
+            overlay.Present("Cleaning up…"); Status("Cleaning up your wording", "Microphone off · Editing locally");
             try { result = await engines.CleanupAsync(transcript, ct); }
             catch (Exception) when (!ct.IsCancellationRequested)
             {
@@ -227,7 +242,7 @@ internal sealed class TrayApp : ApplicationContext
             }
         }
         ct.ThrowIfCancellationRequested(); form.Result.Text = result;
-        Native.SetClipboardText(result);
+        if (!testSession) Native.SetClipboardText(result);
         // Inference is finished; release GPU allocations before clipboard insertion, unless the text model is
         // about to check the wording of this dictation.
         var autoCheck = settings.Suggestions && destination != null && result.Length <= 6000;
@@ -249,7 +264,8 @@ internal sealed class TrayApp : ApplicationContext
         }
         else if (destination == null)
         {
-            Status("Text copied to clipboard · models unloaded", "Your result was copied to the clipboard and is ready to paste.");
+            Status(testSession ? "Test result ready · models unloaded" : "Text copied to clipboard · models unloaded",
+                testSession ? "Sample audio processed · Microphone off · Your result is shown below." : "Your result was copied to the clipboard and is ready to paste.");
         }
         else Status("Ready · models unloaded", fallback ? "Cleanup was unavailable. Your original text was kept." : $"Microphone off · Last dictation processed in {seconds:F1}s · All processing stayed on this PC");
     }
@@ -262,7 +278,7 @@ internal sealed class TrayApp : ApplicationContext
         CloseSuggestion();
         if (paused) Resume();
         processing = true; var id = ++generation;
-        form.SetSuggestionBusy(true);
+        SetBusy(true);
         using var currentOperation = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);
         operation = currentOperation; var ct = currentOperation.Token;
         EscapeEnabled(true);
@@ -280,7 +296,7 @@ internal sealed class TrayApp : ApplicationContext
         finally
         {
             if (operation == currentOperation) operation = null;
-            if (id == generation) { ReleaseModels(); processing = false; form.SetSuggestionBusy(paused); overlay.Dismiss(); EscapeEnabled(false); }
+            if (id == generation) { ReleaseModels(); processing = false; SetBusy(paused); overlay.Dismiss(); EscapeEnabled(false); }
         }
     }
 
@@ -328,11 +344,11 @@ internal sealed class TrayApp : ApplicationContext
         // Mark the dictated text in the field first so the preview stays above the marker.
         if (destination != null) highlight.Present(destination);
         if (!automatic) preview.Show();
-        processing = true; suggesting = true; form.SetSuggestionBusy(true); EscapeEnabled(true);
+        processing = true; suggesting = true; SetBusy(true); EscapeEnabled(true);
         var id = ++generation;
         using var currentOperation = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);
         operation = currentOperation; var ct = currentOperation.Token;
-        Status("Suggesting clearer wording", "Microphone off · Qwen is editing locally · Esc cancels");
+        Status("Suggesting clearer wording", "Microphone off · Editing locally · Esc cancels");
         try
         {
             if (source.Length > 6000) throw new InvalidOperationException("Suggestions support up to 6,000 characters. Shorten the result and try again.");
@@ -373,7 +389,7 @@ internal sealed class TrayApp : ApplicationContext
         finally
         {
             if (operation == currentOperation) operation = null;
-            if (id == generation) { ReleaseModels(); processing = false; suggesting = false; form.SetSuggestionBusy(paused); EscapeEnabled(false); }
+            if (id == generation) { ReleaseModels(); processing = false; suggesting = false; SetBusy(paused); EscapeEnabled(false); }
         }
     }
 
@@ -401,7 +417,7 @@ internal sealed class TrayApp : ApplicationContext
             || index < 0 || index >= marks.Count || form.Result.Text != source || !settings.Suggestions) { highlight.Release(); return; }
         var text = TextDiff.ApplyOne(parts, marks[index]);
         var suggested = preview.SuggestedText;
-        processing = true; suggesting = true; form.SetSuggestionBusy(true);
+        processing = true; suggesting = true; SetBusy(true);
         var id = ++generation;
         using var currentOperation = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);
         operation = currentOperation; var ct = currentOperation.Token;
@@ -436,7 +452,7 @@ internal sealed class TrayApp : ApplicationContext
         finally
         {
             if (operation == currentOperation) operation = null;
-            if (id == generation) { processing = false; suggesting = false; form.SetSuggestionBusy(paused); }
+            if (id == generation) { processing = false; suggesting = false; SetBusy(paused); }
         }
     }
 
@@ -452,7 +468,7 @@ internal sealed class TrayApp : ApplicationContext
             Status("Suggestion applied", "The last result has been updated. Your original transcript is still available.");
             return;
         }
-        processing = true; suggesting = true; form.SetSuggestionBusy(true); preview.SetApplying();
+        processing = true; suggesting = true; SetBusy(true); preview.SetApplying();
         var id = ++generation;
         using var currentOperation = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);
         operation = currentOperation; var ct = currentOperation.Token;
@@ -475,7 +491,7 @@ internal sealed class TrayApp : ApplicationContext
         finally
         {
             if (operation == currentOperation) operation = null;
-            if (id == generation) { processing = false; suggesting = false; form.SetSuggestionBusy(paused); }
+            if (id == generation) { processing = false; suggesting = false; SetBusy(paused); }
         }
     }
 
@@ -484,7 +500,7 @@ internal sealed class TrayApp : ApplicationContext
         ++generation; operation?.Cancel(); pendingSuggestion = null;
         mic?.Dispose(); mic = null;
         ReleaseModels();
-        recording = false; processing = false; suggesting = false; CloseSuggestion(); form.SetSuggestionBusy(paused); overlay.Dismiss(); EscapeEnabled(false);
+        recording = false; processing = false; suggesting = false; CloseSuggestion(); SetBusy(paused); overlay.Dismiss(); EscapeEnabled(false);
         Status(paused ? "Paused · models unloaded" : "Cancelled · models unloaded", "Microphone off · No new text will be inserted.");
     }
 
@@ -498,7 +514,7 @@ internal sealed class TrayApp : ApplicationContext
     private void Resume()
     {
         paused = false;
-        form.SetSuggestionBusy(false);
+        SetBusy(false);
         Status("Ready · models unloaded", "Microphone off · Models load when you start dictating");
     }
 

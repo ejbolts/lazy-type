@@ -2,6 +2,7 @@
 
 No administrator rights, Python packages, CUDA toolkit or cloud account required.
 """
+import argparse
 import concurrent.futures
 import hashlib
 import json
@@ -31,6 +32,19 @@ ASSETS = [
      'https://github.com/ggml-org/llama.cpp/releases/download/b11146/cudart-llama-bin-win-cuda-12.4-x64.zip',
      '8c79a9b226de4b3cacfd1f83d24f962d0773be79f1e7b75c6af4ded7e32ae1d6', 'engines/llama'),
 ]
+TEXT_ASSETS = {
+    'qwen35': ('models/qwen3.5-9b-q4.gguf',
+        'https://huggingface.co/unsloth/Qwen3.5-9B-GGUF/resolve/3885219b6810b007914f3a7950a8d1b469d598a5/Qwen3.5-9B-Q4_K_M.gguf',
+        '03b74727a860a56338e042c4420bb3f04b2fec5734175f4cb9fa853daf52b7e8', None),
+    'gemma': ('models/gemma4-12b-q4.gguf',
+        'https://huggingface.co/unsloth/gemma-4-12b-it-GGUF/resolve/fc034cfff751157913579611efad8462ac1be606/gemma-4-12b-it-Q4_K_M.gguf',
+        '0a270ec9fe6b34f4a0d33992b6135117b484ebc4766ab76b51d4ae8c457e4c42', None),
+}
+
+def assets_for(choice):
+    optional = {'current': [], 'qwen35': ['qwen35'], 'gemma': ['gemma'],
+                'dynamic': ['gemma'], 'all': ['qwen35', 'gemma']}[choice]
+    return ASSETS + [TEXT_ASSETS[name] for name in optional]
 
 def digest(path):
     h = hashlib.sha256()
@@ -43,6 +57,14 @@ def download(asset):
     name, url, expected, destination = asset
     path = ROOT / name
     path.parent.mkdir(parents=True, exist_ok=True)
+    if not path.exists() and asset in TEXT_ASSETS.values():
+        # Reuse verified benchmark weights without a second download or copy.
+        filename = url.rsplit('/', 1)[1]
+        for existing in sorted((ROOT / 'benchmarks').glob('*/models/' + filename), reverse=True):
+            if digest(existing) == expected:
+                reused = (existing.relative_to(ROOT).as_posix(), url, expected, destination)
+                print('Verified existing ' + reused[0], flush=True)
+                return reused
     if not path.exists() or digest(path) != expected:
         partial = Path(str(path) + '.partial')
         print('Downloading ' + name, flush=True)
@@ -57,11 +79,19 @@ def download(asset):
     return asset
 
 def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--text-model', choices=['current', 'qwen35', 'gemma', 'dynamic', 'all'], default='current')
+    parser.add_argument('--list', action='store_true', help='List selected pinned assets without downloading')
+    options = parser.parse_args()
+    assets = assets_for(options.text_model)
+    if options.list:
+        print(json.dumps([{'file': a[0], 'source': a[1], 'sha256': a[2]} for a in assets], indent=2))
+        return
     ROOT.mkdir(parents=True, exist_ok=True)
     with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
-        list(pool.map(download, ASSETS))
+        installed = list(pool.map(download, assets))
     # Extract sequentially: llama and its CUDA runtime share a destination.
-    for name, url, expected, destination in ASSETS:
+    for name, url, expected, destination in installed:
         if destination:
             target = (ROOT / destination).resolve()
             target.mkdir(parents=True, exist_ok=True)
@@ -71,8 +101,11 @@ def main():
                         raise RuntimeError('Archive path outside destination')
                 archive.extractall(target)
             print('Installed ' + destination, flush=True)
-    manifest = [{'file': a[0], 'source': a[1], 'sha256': a[2]} for a in ASSETS]
-    (ROOT / 'models-manifest.json').write_text(json.dumps(manifest, indent=2))
+    manifest_path = ROOT / 'models-manifest.json'
+    previous = json.loads(manifest_path.read_text()) if manifest_path.exists() else []
+    manifest = {a['file']: a for a in previous}
+    manifest.update({a[0]: {'file': a[0], 'source': a[1], 'sha256': a[2]} for a in installed})
+    manifest_path.write_text(json.dumps(list(manifest.values()), indent=2))
     print('Local models and CUDA engines ready: ' + str(ROOT), flush=True)
 
 if __name__ == '__main__':

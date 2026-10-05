@@ -1,6 +1,6 @@
 # Lazy Type
 
-Local dictation for Windows with NVIDIA GPUs. Whisper Turbo transcribes your speech, Qwen 3 cleans up grammar and punctuation, and text is inserted into the active application. Processing stays entirely on your PC. Model workers load when needed and release memory when finished.
+Local dictation for Windows with NVIDIA GPUs. Whisper Turbo transcribes your speech, your selected local model cleans up grammar and punctuation, and text is inserted into the active application. Processing stays entirely on your PC. Model workers load when needed and release memory when finished.
 
 ## Use
 
@@ -21,6 +21,22 @@ For the alternate Ctrl+Shift+Space hotkey, add Alt for raw dictation. For F8, us
 
 **App theme** defaults to **System** and follows the Windows app color setting, including changes while Lazy Type is running. Choose **Light** or **Dark** to override it. **Popup theme** independently controls the floating dictation indicator: **Follow app** (default), **Light**, or **Dark**. Both choices are saved. Use **Preview** to see the popup for five seconds without opening the microphone or loading models.
 
+## Text model selection
+
+Choose one checkbox in **Text model**. The selection is saved, and existing settings default to **Qwen3 4B (current)**. Manual choices are **Qwen3 4B**, **Qwen3.5 9B**, and **Gemma 4 12B**. Only the selected model loads. Choices are locked while recording or editing; change them when idle or paused.
+
+**Dynamic** loads the current Qwen first. Five seconds after Qwen passes its readiness check, Gemma starts loading in the background. Qwen remains available during loading. Once Gemma passes its readiness check, new edits use Gemma; edits already running on Qwen finish on Qwen before it unloads. A failed or missing Gemma load leaves Qwen available and shows **Gemma unavailable**. There is no automatic retry loop during that recording. If a short dictation finishes before the handover, it uses Qwen and cancels the pending upgrade. Escape, Pause, Quit, and normal completion release both workers, including a partially loaded Gemma.
+
+The overlap needs memory for Whisper, Qwen, and Gemma together, in addition to other applications. This flow is tested on an RTX 4080 with 16 GB VRAM. Select a manual model if your GPU cannot accommodate the overlap. Dynamic does not re-edit an already completed result.
+
+The additional models are optional. Install all choices with:
+
+```powershell
+python scripts/setup_models.py --text-model all
+```
+
+Use `--text-model qwen35`, `gemma`, or `dynamic` to install only the corresponding additional weights, or pass `-TextModel all` to `scripts/install.ps1`. Defaults still download the current model only. Pinned Q4_K_M files are approximately 5.68 GB for Qwen3.5 and 7.12 GB for Gemma. Existing benchmark downloads under `benchmarks/*/models` are reused without copying them. Selecting a model does not download it; a missing manual model is reported when used. All text models run with thinking disabled for bounded editing responses.
+
 ## AI suggestions
 
 Turn on **AI suggestions · check wording after dictation** in the main window. It is off by default and saved separately from speech cleanup.
@@ -37,7 +53,7 @@ Turn on **AI suggestions · check wording after dictation** in the main window. 
 
 The marks and bar never take focus, so you can keep typing. Labels sit on whichever side covers less of your other text. The wand beside **Last result** in Lazy Type runs the same check on demand and shows the comparison in the pop-up.
 
-**How this differs from cleanup.** Both use the same local Qwen model with different instructions. Cleanup is automatic and minimal: it corrects grammar, punctuation and capitalisation, removes fillers, false starts and pause dashes, resolves self-corrections, and otherwise keeps your wording. Suggestions may reword awkward phrasing and improve flow, so they are only applied when you choose. Both keep facts, names, numbers and dates, and never answer questions or follow instructions in the dictation. A suggestion that changes too much or alters a number is discarded.
+**How this differs from cleanup.** Both use the selected local text model with different instructions. Cleanup is automatic and minimal: it corrects grammar, punctuation and capitalisation, removes fillers, false starts and pause dashes, resolves self-corrections, and otherwise keeps your wording. Suggestions may reword awkward phrasing and improve flow, so they are only applied when you choose. Both keep facts, names, numbers and dates, and never answer questions or follow instructions in the dictation. A suggestion that changes too much or alters a number is discarded.
 
 **Limits and safety.**
 
@@ -52,7 +68,7 @@ The marks and bar never take focus, so you can keep typing. Labels sit on whiche
 - Whisper Large V3 Turbo Q5_0, approximately 574 MB model file.
 - Qwen3-4B-Instruct-2507 Q4_K_M, approximately 2.5 GB model file.
 - Silero VAD filters silence before transcription.
-- Native CUDA engines use the NVIDIA GPU. Qwen has a 4,096-token context and a single processing slot to bound memory use.
+- Native CUDA engines use the NVIDIA GPU. Each text worker has a 4,096-token context and a single processing slot to bound memory use.
 - No cloud transcription or cleanup; the only inference connections are loopback connections on this PC. The text server uses a per-session authentication key.
 - Recordings are processed in memory. The last original and edited transcript are kept in the app until exit. There is no persistent transcript history.
 - Operational logs exclude dictated content. Model files, runtime archives, settings and logs are stored in `%USERPROFILE%\Applications\LazyType`.
@@ -77,6 +93,21 @@ dotnet build src/LazyType/LazyType.csproj -c Release
 To disable startup, clear **Start with Windows**. To remove the application, quit it, disable startup and remove the `Lazy Type` Start menu shortcut and `%USERPROFILE%\Applications\LazyType` directory. That directory contains only this app's assets/settings.
 
 ## Verification
+
+Run the deterministic model lifecycle and editing regressions:
+
+```powershell
+dotnet run --project tests/LazyType.Tests -c Release
+python -m unittest discover -s tests -p "test_*.py"
+```
+
+To exercise all installed text models with real speech inference, the five-second handover, an edit in flight, and cancellation (no microphone or insertion):
+
+```powershell
+dotnet run --project tests/LazyType.Tests -c Release -- --integration --audio path/to/public-16k-mono.wav
+```
+
+These optional integration checks need all three models and a compatible GPU. Use synthetic or public audio. The tests keep model files on disk.
 
 To repeat the memory measurement with the installed models and NVIDIA driver (wait until dictation is idle first):
 

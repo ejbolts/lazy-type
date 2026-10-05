@@ -11,7 +11,6 @@ internal sealed class MainForm : Form
 
     // Dictation shortcut card
     private readonly Panel shortcutCard = new();
-    private readonly Label shortcutAction = new();
     private string currentHotkey = "Ctrl+Alt+Space";
 
     // Setting rows controls
@@ -101,12 +100,7 @@ internal sealed class MainForm : Form
         shortcutCard.Height = 52;
         shortcutCard.Paint += PaintShortcutCard;
 
-        shortcutAction.Text = "Start or stop dictation";
-        shortcutAction.Font = new Font("Segoe UI", 9.5f, FontStyle.Regular);
-        shortcutAction.Dock = DockStyle.Right;
-        shortcutAction.Width = 180;
-        shortcutAction.TextAlign = ContentAlignment.MiddleRight;
-        shortcutCard.Controls.Add(shortcutAction);
+
 
         // --- 3. Settings Rows ---
         var settingsContainer = new Panel { Dock = DockStyle.Top, Height = 210, Padding = new Padding(0, 10, 0, 10) };
@@ -395,7 +389,10 @@ internal sealed class MainForm : Form
             }
         }
 
-
+        Color actionFg = isDark ? Color.FromArgb(170, 180, 200) : Color.FromArgb(102, 112, 133);
+        var actionRect = new Rectangle(shortcutCard.Width - 194, 0, 180, shortcutCard.Height);
+        using var actionFont = new Font("Segoe UI", 9.5f, FontStyle.Regular);
+        TextRenderer.DrawText(g, "Start or stop dictation", actionFont, actionRect, actionFg, TextFormatFlags.Right | TextFormatFlags.VerticalCenter);
     }
 
     private void PaintResultCard(object? sender, PaintEventArgs e)
@@ -454,7 +451,6 @@ internal sealed class MainForm : Form
 
         greeting.ForeColor = ForeColor;
         statusDetail.ForeColor = dark ? Color.FromArgb(150, 165, 185) : Color.FromArgb(100, 116, 139);
-        shortcutAction.ForeColor = dark ? Color.FromArgb(160, 175, 200) : Color.FromArgb(100, 116, 139);
         accordionLabel.ForeColor = dark ? Color.FromArgb(160, 175, 200) : Color.FromArgb(100, 116, 139);
 
         Clean.IsDark = dark;

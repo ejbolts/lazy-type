@@ -91,7 +91,7 @@ internal sealed class SuggestionForm : Form
     private readonly Label title = new();
     private readonly Label subtitle = new();
     private readonly Panel contentCard = new();
-    private readonly TextBox suggestion = new();
+    private readonly RichTextBox suggestion = new();
     private readonly ModernButton apply = new();
     private readonly ModernButton keep = new();
     private readonly ModernButton copy = new();
@@ -99,8 +99,10 @@ internal sealed class SuggestionForm : Form
     private readonly Panel headerPanel = new();
     private readonly System.Windows.Forms.Timer copyResetTimer = new() { Interval = 1600 };
     private bool isDark;
+    private string suggestedText = string.Empty;
+    private IReadOnlyList<DiffPart>? changes;
     public event Action? ApplyRequested;
-    public string SuggestedText => suggestion.Text;
+    public string SuggestedText => suggestedText;
 
     public SuggestionForm(string original, bool external, bool isDark = false)
     {
@@ -170,13 +172,15 @@ internal sealed class SuggestionForm : Form
         contentCard.Dock = DockStyle.Fill;
         contentCard.Padding = new Padding(12);
 
-        suggestion.Multiline = true;
-        suggestion.ScrollBars = ScrollBars.Vertical;
+        // Read-only comparison: removed words are struck through and added words are tinted.
+        suggestion.ScrollBars = RichTextBoxScrollBars.Vertical;
         suggestion.Dock = DockStyle.Fill;
         suggestion.BorderStyle = BorderStyle.None;
         suggestion.Font = new Font("Segoe UI", 10f);
         suggestion.Text = "Generating suggestion…";
-        suggestion.ReadOnly = false;
+        suggestion.ReadOnly = true;
+        suggestion.DetectUrls = false;
+        suggestion.TabStop = false;
         contentCard.Controls.Add(suggestion);
 
         // Action row
@@ -198,7 +202,7 @@ internal sealed class SuggestionForm : Form
         copy.IconDrawAction = (g, rect, col) => VectorIcons.DrawCopy(g, rect, col);
         copy.Click += (_, _) =>
         {
-            if (!string.IsNullOrEmpty(suggestion.Text) && Native.SetClipboardText(suggestion.Text))
+            if (!string.IsNullOrEmpty(suggestedText) && Native.SetClipboardText(suggestedText))
             {
                 copy.Text = "Copied!";
                 copyResetTimer.Stop();
@@ -250,19 +254,63 @@ internal sealed class SuggestionForm : Form
         UpdateRegion();
     }
 
-    public void ShowSuggestion(string text, bool changed, bool canApply)
+    public void ShowSuggestion(string text, IReadOnlyList<DiffPart> parts, bool canApply)
     {
-        suggestion.Text = text;
+        suggestedText = text;
+        var changed = TextDiff.HasChanges(parts);
+        changes = changed ? parts : null;
+        subtitle.Text = changed ? "Suggested changes" : "No changes needed";
         apply.Enabled = canApply && changed;
         apply.Text = changed ? "Apply suggestion" : "Already optimal";
+        RenderChanges();
         AdjustHeight();
     }
 
     public void ShowFailure(string message)
     {
+        changes = null;
         suggestion.Text = message;
         apply.Enabled = false;
         AdjustHeight();
+    }
+
+    private void RenderChanges()
+    {
+        if (string.IsNullOrEmpty(suggestedText)) return;
+        suggestion.Clear();
+        if (changes == null)
+        {
+            Append("Looks good. Your wording already reads clearly, so there's nothing to change.", suggestion.ForeColor, FontStyle.Regular);
+            return;
+        }
+        var removed = isDark ? Color.FromArgb(240, 128, 140) : Color.FromArgb(196, 50, 66);
+        var added = isDark ? Color.FromArgb(190, 160, 255) : Color.FromArgb(109, 64, 204);
+        // A tint behind added text keeps a new comma or full stop visible.
+        var addedTint = isDark ? Color.FromArgb(68, 50, 112) : Color.FromArgb(230, 220, 255);
+        for (var i = 0; i < changes.Count; i++)
+        {
+            var part = changes[i];
+            if (part.Kind == DiffKind.Equal) Append(part.Text, suggestion.ForeColor, FontStyle.Regular);
+            else if (part.Kind == DiffKind.Removed)
+            {
+                Append(part.Text, removed, FontStyle.Strikeout);
+                // Separate a struck-out word from its replacement word for readability; display only.
+                if (i + 1 < changes.Count && changes[i + 1].Kind == DiffKind.Added && char.IsLetterOrDigit(part.Text[^1]) && char.IsLetterOrDigit(changes[i + 1].Text[0]))
+                    Append(" ", suggestion.ForeColor, FontStyle.Regular);
+            }
+            else Append(part.Text, added, FontStyle.Bold, addedTint);
+        }
+        suggestion.Select(0, 0);
+    }
+
+    private void Append(string text, Color color, FontStyle style, Color? tint = null)
+    {
+        suggestion.SelectionStart = suggestion.TextLength;
+        suggestion.SelectionLength = 0;
+        suggestion.SelectionColor = color;
+        suggestion.SelectionBackColor = tint ?? suggestion.BackColor;
+        suggestion.SelectionFont = new Font(suggestion.Font, style);
+        suggestion.AppendText(text);
     }
 
     public void SetApplying()
@@ -293,6 +341,7 @@ internal sealed class SuggestionForm : Form
         contentCard.BackColor = dark ? Color.FromArgb(36, 30, 56) : Color.FromArgb(245, 243, 255);
         suggestion.BackColor = contentCard.BackColor;
         suggestion.ForeColor = ForeColor;
+        if (!string.IsNullOrEmpty(suggestedText)) RenderChanges();
 
         close.ForeColor = dark ? Color.FromArgb(180, 175, 200) : Color.FromArgb(120, 125, 140);
         close.BackColor = Color.Transparent;

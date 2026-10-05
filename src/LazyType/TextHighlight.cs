@@ -18,11 +18,12 @@ internal sealed class TextHighlight : Form
     [StructLayout(LayoutKind.Sequential, Pack = 1)] private struct BLENDFUNCTION { public byte op, flags, alpha, format; }
 
     private static readonly Color Accent = Color.FromArgb(127, 86, 217);
-    private const int Pad = 4;
+    private const int Pad = 7;
     private readonly System.Windows.Forms.Timer timer = new() { Interval = 40 };
     private readonly Stopwatch clock = new();
     private TextTarget? target;
     private Rectangle[] lines = Array.Empty<Rectangle>();
+    private IReadOnlyList<TextSpan>? spans;
     private bool working;
     private int ticks;
 
@@ -41,25 +42,26 @@ internal sealed class TextHighlight : Form
         get { var cp = base.CreateParams; cp.ExStyle |= 0x80000 | 0x08000000 | 0x80 | 0x20; return cp; } // LAYERED | NOACTIVATE | TOOLWINDOW | TRANSPARENT
     }
 
-    // Pulses while the suggestion is generated, then settles into a steady highlight.
+    // Pulses over the whole dictation while the suggestion is generated, then settles on just the words it changes.
     public void Present(TextTarget destination)
     {
-        target = destination; working = true; ticks = 0;
+        target = destination; working = true; ticks = 0; spans = null;
         lines = Array.Empty<Rectangle>();
         clock.Restart(); timer.Start();
         Step();
     }
 
-    public void Settle()
+    public void Settle(IReadOnlyList<TextSpan> changed)
     {
         if (target == null) return;
-        working = false;
-        Render();
+        if (changed.Count == 0) { Dismiss(); return; }
+        spans = changed; working = false; ticks = 0;
+        Step();
     }
 
     public void Dismiss()
     {
-        timer.Stop(); target = null; working = false;
+        timer.Stop(); target = null; working = false; spans = null;
         lines = Array.Empty<Rectangle>();
         Hide();
     }
@@ -69,7 +71,7 @@ internal sealed class TextHighlight : Form
         // Re-measure a few times per second so the marker follows scrolling, moves and edits.
         if (ticks++ % 3 == 0)
         {
-            var next = target?.InsertionLineBounds().Where(target.IsUncovered).ToArray() ?? Array.Empty<Rectangle>();
+            var next = target?.InsertionLineBounds(spans).Where(target.IsUncovered).ToArray() ?? Array.Empty<Rectangle>();
             var changed = !next.SequenceEqual(lines);
             lines = next;
             if (lines.Length == 0) { Hide(); return; }
@@ -98,6 +100,8 @@ internal sealed class TextHighlight : Form
             foreach (var line in lines)
             {
                 var box = line; box.Offset(-area.Left, -area.Top);
+                // Keep a changed comma or full stop wide enough to notice.
+                if (box.Width < 8) box.Inflate((9 - box.Width) / 2, 0);
                 var thickness = Math.Max(2, (int)Math.Round(line.Height / 12f));
                 DrawingHelpers.FillRoundedRectangle(g, fillBrush, Rectangle.Inflate(box, 2, 1), 3);
                 DrawingHelpers.FillRoundedRectangle(g, lineBrush, new Rectangle(box.Left, box.Bottom, box.Width, thickness), Math.Max(1, thickness / 2));

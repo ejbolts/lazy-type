@@ -99,6 +99,8 @@ internal sealed class TextTarget
     private bool protectedField;
     private string? insertedText, documentSnapshot;
     private TextPatternRange? insertionRange;
+    private IReadOnlyList<TextSpan>? markedSpans;
+    private TextPatternRange[]? markedRanges;
     public static TextTarget Capture()
     {
         var target = new TextTarget { Window = Native.GetForegroundWindow() };
@@ -147,7 +149,7 @@ internal sealed class TextTarget
     // Unsupported editors still offer a copyable preview.
     public void RememberInsertion(string text)
     {
-        insertedText = null; documentSnapshot = null; insertionRange = null;
+        insertedText = null; documentSnapshot = null; insertionRange = null; markedRanges = null;
         try
         {
             var pattern = TextPattern();
@@ -177,22 +179,39 @@ internal sealed class TextTarget
         return OwnsPoint(line.Left + inset, y) && OwnsPoint(line.Right - 1 - inset, y);
     }
     private bool OwnsPoint(int x, int y) => Window != IntPtr.Zero && Native.GetAncestor(Native.WindowFromPoint(new Native.POINT { X = x, Y = y }), 2 /* GA_ROOT */) == Window;
-    // Screen bounds of each visible line of the dictation, clipped to the field. Empty once the field changes.
-    public Rectangle[] InsertionLineBounds()
+    // Screen bounds of each visible line of the dictation, or only of the given spans within it, clipped to the field.
+    // Empty once the field changes.
+    public Rectangle[] InsertionLineBounds(IReadOnlyList<TextSpan>? spans = null)
     {
         try
         {
             if (!CanReplaceInsertion()) return Array.Empty<Rectangle>();
             insertionRange ??= TextPattern()?.DocumentRange.FindText(insertedText!, false, false);
-            if (insertionRange == null || insertionRange.GetText(-1) != insertedText) { insertionRange = null; return Array.Empty<Rectangle>(); }
+            if (insertionRange == null || insertionRange.GetText(-1) != insertedText) { insertionRange = null; markedRanges = null; return Array.Empty<Rectangle>(); }
+            if (spans != null && (markedRanges == null || !ReferenceEquals(spans, markedSpans)))
+            {
+                markedSpans = spans;
+                markedRanges = spans.Select(SpanRange).OfType<TextPatternRange>().ToArray();
+            }
+            var ranges = spans == null ? new[] { insertionRange } : markedRanges!;
             var field = element!.Current.BoundingRectangle;
-            return insertionRange.GetBoundingRectangles()
+            return ranges.SelectMany(range => range.GetBoundingRectangles())
                 .Select(line => System.Windows.Rect.Intersect(line, field))
                 .Where(line => !line.IsEmpty && line.Width >= 1 && line.Height >= 4)
                 .Select(line => Rectangle.FromLTRB((int)Math.Floor(line.Left), (int)Math.Floor(line.Top), (int)Math.Ceiling(line.Right), (int)Math.Ceiling(line.Bottom)))
                 .ToArray();
         }
-        catch { insertionRange = null; return Array.Empty<Rectangle>(); }
+        catch { insertionRange = null; markedRanges = null; return Array.Empty<Rectangle>(); }
+    }
+    // A range for part of the dictation, used only if the editor reports exactly the expected text.
+    private TextPatternRange? SpanRange(TextSpan span)
+    {
+        if (span.Start < 0 || span.Length <= 0 || span.Start + span.Length > insertedText!.Length) return null;
+        var range = insertionRange!.Clone();
+        range.MoveEndpointByRange(TextPatternRangeEndpoint.End, range, TextPatternRangeEndpoint.Start);
+        if (range.MoveEndpointByUnit(TextPatternRangeEndpoint.End, TextUnit.Character, span.Start + span.Length) != span.Start + span.Length) return null;
+        if (range.MoveEndpointByUnit(TextPatternRangeEndpoint.Start, TextUnit.Character, span.Start) != span.Start) return null;
+        return range.GetText(-1) == insertedText.Substring(span.Start, span.Length) ? range : null;
     }
     public async Task<bool> ReplaceInsertionAsync(string text, CancellationToken ct)
     {
@@ -213,9 +232,10 @@ internal sealed class TextTarget
                 try
                 {
                     var selected = pattern.GetSelection();
+                    // Chrome can report a different end position for the same text, so check the start and the exact selected text.
                     return CanReplaceInsertion() && selected.Length == 1
                         && selected[0].CompareEndpoints(TextPatternRangeEndpoint.Start, range, TextPatternRangeEndpoint.Start) == 0
-                        && selected[0].CompareEndpoints(TextPatternRangeEndpoint.End, range, TextPatternRangeEndpoint.End) == 0;
+                        && selected[0].GetText(insertedText!.Length + 1) == insertedText;
                 }
                 catch { return false; }
             }

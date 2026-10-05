@@ -320,8 +320,9 @@ internal sealed class TrayApp : ApplicationContext
             ct.ThrowIfCancellationRequested();
             if (suggestionForm == preview && form.Result.Text == source)
             {
-                preview.ShowSuggestion(text, text != source, destination == null || destination.CanReplaceInsertion());
-                highlight.Settle();
+                var parts = TextDiff.Compare(source, text);
+                preview.ShowSuggestion(text, parts, destination == null || destination.CanReplaceInsertion());
+                highlight.Settle(TextDiff.HasChanges(parts) ? TextDiff.ChangedSpans(source, parts) : Array.Empty<TextSpan>());
             }
             Status("Suggestion ready · models unloaded", "Review the suggestion before applying. Your original transcript is still available.");
         }
@@ -331,7 +332,7 @@ internal sealed class TrayApp : ApplicationContext
             if (!ct.IsCancellationRequested && suggestionForm == preview)
             {
                 preview.ShowFailure("Suggestion unavailable. Your text is unchanged. Close and try again.");
-                highlight.Settle();
+                highlight.Dismiss();
                 Status("Suggestion unavailable · models unloaded", e.Message);
                 AppLog.Write("Suggestion failed: " + e.GetType().Name);
             }

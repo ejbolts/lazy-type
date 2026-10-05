@@ -49,21 +49,23 @@ internal static class Program
                 bmp.Save(Path.Combine(outDir, "main_form_rendered.png"), ImageFormat.Png);
             }
 
-            using var sugg = new SuggestionForm("thanks for sending this over", false, false);
-            sugg.ShowSuggestion("Thanks for sending this over. The new layout is much clearer.", true, true);
-            sugg.Show();
-            System.Windows.Forms.Application.DoEvents();
-            Thread.Sleep(300);
-
-            using (var bmpSugg = new Bitmap(sugg.Width, sugg.Height))
+            const string original = "yeah okay i checked the layout and it does seem to be working its much cleaner now";
+            const string polished = "Yeah, okay, I checked the layout, and it does seem to be working. It's much cleaner now.";
+            foreach (var (name, suggested, dark) in new[] { ("suggestion_form_rendered", polished, false), ("suggestion_form_dark", polished, true), ("suggestion_form_unchanged", original, true) })
             {
+                using var sugg = new SuggestionForm(original, false, dark);
+                sugg.ShowSuggestion(suggested, TextDiff.Compare(original, suggested), true);
+                sugg.Show();
+                System.Windows.Forms.Application.DoEvents();
+                Thread.Sleep(300);
+                using var bmpSugg = new Bitmap(sugg.Width, sugg.Height);
                 sugg.DrawToBitmap(bmpSugg, new Rectangle(0, 0, sugg.Width, sugg.Height));
-                bmpSugg.Save(Path.Combine(outDir, "suggestion_form_rendered.png"), ImageFormat.Png);
+                bmpSugg.Save(Path.Combine(outDir, name + ".png"), ImageFormat.Png);
+                sugg.Close();
             }
 
             form.Quitting = true;
             form.Close();
-            sugg.Close();
             return 0;
         }
 
@@ -152,6 +154,16 @@ internal static class SelfTest
                 || TextTarget.HasUniqueText("Repeat. Repeat.", "Repeat.")
                 || TextTarget.HasUniqueText("Sample", "")
                 || TextTarget.HasUniqueText("Sample", "Missing")) throw new Exception("Safe replacement matching failed.");
+            foreach (var (before, after) in new[] { ("yeah okay i checked", "Yeah, okay, I checked"), ("move it to friday sorry thursday", "Move it to Thursday."), ("Same text.", "Same text.") })
+            {
+                var parts = TextDiff.Compare(before, after);
+                if (string.Concat(parts.Where(p => p.Kind != DiffKind.Added).Select(p => p.Text)) != before
+                    || string.Concat(parts.Where(p => p.Kind != DiffKind.Removed).Select(p => p.Text)) != after) throw new Exception("Suggestion comparison lost text.");
+            }
+            var marked = TextDiff.ChangedSpans("yeah okay i checked", TextDiff.Compare("yeah okay i checked", "Yeah, okay, I checked"));
+            if (!marked.SequenceEqual(new[] { new TextSpan(0, 4), new TextSpan(10, 1) })
+                || TextDiff.HasChanges(TextDiff.Compare("Same text.", "Same text. "))
+                || TextDiff.ChangedSpans("Same text.", TextDiff.Compare("Same text.", "Same text.")).Count != 0) throw new Exception("Suggestion change marking failed.");
             if (JsonSerializer.Deserialize<AppSettings>("{}")!.Suggestions
                 || !JsonSerializer.Deserialize<AppSettings>(JsonSerializer.Serialize(new AppSettings { Suggestions = true }))!.Suggestions)
                 throw new Exception("Suggestion preference default or serialization failed.");

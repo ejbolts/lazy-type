@@ -6,11 +6,11 @@ internal sealed class MainForm : Form
 {
     private readonly Label greeting = new();
     private readonly Label statusDetail = new();
-    private readonly Panel statusDot = new();
+    private readonly BufferedPanel statusDot = new();
     private Color dotColor = Color.FromArgb(16, 185, 129); // Green for ready
 
     // Dictation shortcut card
-    private readonly Panel shortcutCard = new();
+    private readonly BufferedPanel shortcutCard = new();
     private string currentHotkey = "Ctrl+Alt+Space";
 
     // Setting rows controls
@@ -23,16 +23,16 @@ internal sealed class MainForm : Form
     public readonly ComboBox PopupThemeChoice = new();
 
     // Last result card
-    private readonly Panel resultCard = new();
-    private readonly Panel editorPanel = new();
+    private readonly BufferedPanel resultCard = new();
+    private readonly BufferedPanel editorPanel = new();
     public readonly TextBox Result = new();
     public readonly TextBox Original = new();
     private readonly WandButton suggest = new();
     private readonly ModernButton copyBtn = new();
     private readonly System.Windows.Forms.Timer copyFeedbackTimer = new() { Interval = 1600 };
-    private readonly Panel accordionHeader = new();
+    private readonly BufferedPanel accordionHeader = new();
     private readonly Label accordionLabel = new();
-    private readonly Panel accordionBody = new();
+    private readonly BufferedPanel accordionBody = new();
     private bool accordionExpanded;
 
     // Footer
@@ -69,11 +69,11 @@ internal sealed class MainForm : Form
         Suggestions.Text = string.Empty;
         Startup.Text = string.Empty;
 
-        var root = new Panel { Dock = DockStyle.Fill, Padding = new Padding(24, 20, 24, 16) };
+        var root = new BufferedPanel { Dock = DockStyle.Fill, Padding = new Padding(24, 20, 24, 16) };
         Controls.Add(root);
 
         // --- 1. Header (Greeting + status dot + explanation) ---
-        var headerPanel = new Panel { Dock = DockStyle.Top, Height = 64 };
+        var headerPanel = new BufferedPanel { Dock = DockStyle.Top, Height = 64 };
 
         statusDot.SetBounds(0, 8, 12, 12);
         statusDot.Paint += (_, e) =>
@@ -103,7 +103,7 @@ internal sealed class MainForm : Form
 
 
         // --- 3. Settings Rows ---
-        var settingsContainer = new Panel { Dock = DockStyle.Top, Height = 210, Padding = new Padding(0, 10, 0, 10) };
+        var settingsContainer = new BufferedPanel { Dock = DockStyle.Top, Height = 210, Padding = new Padding(0, 10, 0, 10) };
 
         // Setting 1: Microphone
         var micRow = CreateSettingRow(g => VectorIcons.DrawMicrophone(g, new Rectangle(0, 0, 20, 20), GetIconColor()),
@@ -140,7 +140,7 @@ internal sealed class MainForm : Form
         resultCard.Padding = new Padding(16, 12, 16, 12);
         resultCard.Paint += PaintResultCard;
 
-        var resultHeader = new Panel { Dock = DockStyle.Top, Height = 32 };
+        var resultHeader = new BufferedPanel { Dock = DockStyle.Top, Height = 32 };
         var resultTitle = new Label { Text = "Last result", Font = new Font("Segoe UI", 10.5f, FontStyle.Bold), AutoSize = false };
         resultTitle.SetBounds(0, 4, 150, 24);
 
@@ -193,7 +193,7 @@ internal sealed class MainForm : Form
         };
 
         // Accordion for Original transcript
-        var accordionContainer = new Panel { Dock = DockStyle.Bottom, AutoSize = true };
+        var accordionContainer = new BufferedPanel { Dock = DockStyle.Bottom, AutoSize = true };
         accordionHeader.Dock = DockStyle.Top;
         accordionHeader.Height = 28;
         accordionHeader.Cursor = Cursors.Hand;
@@ -228,7 +228,7 @@ internal sealed class MainForm : Form
         resultCard.Controls.Add(resultHeader);
 
         // --- 5. Footer Bar ---
-        var footerBar = new Panel { Dock = DockStyle.Bottom, Height = 50, Padding = new Padding(0, 10, 0, 0) };
+        var footerBar = new BufferedPanel { Dock = DockStyle.Bottom, Height = 50, Padding = new Padding(0, 10, 0, 0) };
 
         pauseBtn.Text = "Pause dictation";
         pauseBtn.Style = ModernButton.ButtonStyle.Secondary;
@@ -277,9 +277,9 @@ internal sealed class MainForm : Form
 
     private Panel CreateSettingRow(Action<Graphics> drawIcon, string title, string? subtitle, Control rightControl)
     {
-        var row = new Panel { Height = subtitle != null ? 52 : 44, Padding = new Padding(4, 4, 4, 4) };
+        var row = new BufferedPanel { Height = subtitle != null ? 52 : 44, Padding = new Padding(4, 4, 4, 4) };
 
-        var iconBox = new Panel { Width = 28, Height = 28, Location = new Point(4, (row.Height - 28) / 2) };
+        var iconBox = new BufferedPanel { Width = 28, Height = 28, Location = new Point(4, (row.Height - 28) / 2) };
         iconBox.Paint += (_, e) => drawIcon(e.Graphics);
 
         int labelX = 36;
@@ -370,6 +370,7 @@ internal sealed class MainForm : Form
         Color keyFg = isDark ? Color.FromArgb(230, 235, 245) : Color.FromArgb(50, 60, 80);
         using var kBrush = new SolidBrush(keyBg);
         using var kPen = new Pen(keyBorder, 1f);
+        using var keyFont = new Font("Segoe UI", 9f, FontStyle.Bold);
 
         for (int i = 0; i < keys.Length; i++)
         {
@@ -379,7 +380,7 @@ internal sealed class MainForm : Form
 
             DrawingHelpers.FillRoundedRectangle(g, kBrush, kRect, 5);
             DrawingHelpers.DrawRoundedRectangle(g, kPen, kRect, 5);
-            TextRenderer.DrawText(g, keyText, new Font("Segoe UI", 9f, FontStyle.Bold), kRect, keyFg, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
+            TextRenderer.DrawText(g, keyText, keyFont, kRect, keyFg, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
 
             x += keyW + 6;
             if (i < keys.Length - 1)

@@ -4,6 +4,17 @@ using System.Windows.Forms;
 
 namespace LazyType;
 
+internal sealed class BufferedPanel : Panel
+{
+    public BufferedPanel()
+    {
+        // Repaint the full surface when docking/anchoring changes its size, so
+        // rounded borders and moved child controls cannot leave old pixels behind.
+        SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint |
+            ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
+    }
+}
+
 internal static class DrawingHelpers
 {
     public static GraphicsPath CreateRoundedRectangle(Rectangle bounds, int radius)

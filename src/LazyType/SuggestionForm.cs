@@ -180,15 +180,8 @@ internal sealed class SuggestionForm : Form
         copy.Enabled = false;
         copy.Click += (_, _) =>
         {
-            try
-            {
-                Clipboard.SetText(suggestion.Text);
-                hint.Text = "Copied. Paste it wherever you need it.";
-            }
-            catch
-            {
-                hint.Text = "Clipboard is busy. Please try again.";
-            }
+            if (Native.SetClipboardText(suggestion.Text)) hint.Text = "Copied. Paste it wherever you need it.";
+            else hint.Text = "Clipboard is busy. Please try again.";
         };
 
         var dismiss = new Button { Text = "Keep original", AutoSize = true, Height = 32 };

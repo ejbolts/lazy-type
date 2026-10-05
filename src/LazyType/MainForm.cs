@@ -120,7 +120,7 @@ internal sealed class MainForm : Form
 
         var buttons = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false, Padding = new Padding(0, 10, 0, 0) };
         pause.Text = "Pause && free memory"; pause.Width = 170; pause.Height = 32; pause.Click += (_, _) => PauseRequested?.Invoke();
-        var copy = new Button { Text = "Copy result", Width = 105, Height = 32 }; copy.Click += (_, _) => { if (Result.TextLength > 0) try { Clipboard.SetText(Result.Text); } catch { } };
+        var copy = new Button { Text = "Copy result", Width = 105, Height = 32 }; copy.Click += (_, _) => { if (Result.TextLength > 0) Native.SetClipboardText(Result.Text); };
         var import = new Button { Text = "Test WAV…", Width = 102, Height = 32 }; import.Click += (_, _) => ImportRequested?.Invoke();
         var hide = new Button { Text = "Hide", Width = 70, Height = 32 }; hide.Click += (_, _) => Hide();
         var quit = new Button { Text = "Quit", Width = 65, Height = 32 }; quit.Click += (_, _) => QuitRequested?.Invoke();

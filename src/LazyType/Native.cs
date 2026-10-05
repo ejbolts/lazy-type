@@ -20,6 +20,8 @@ internal static class Native
     [DllImport("user32.dll", SetLastError = true)] public static extern bool RegisterHotKey(IntPtr hwnd, int id, uint modifiers, uint key);
     [DllImport("user32.dll")] public static extern bool UnregisterHotKey(IntPtr hwnd, int id);
     [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll")] public static extern IntPtr WindowFromPoint(POINT point);
+    [DllImport("user32.dll")] public static extern IntPtr GetAncestor(IntPtr hwnd, uint flags);
     [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hwnd);
     [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint processId);
     [DllImport("user32.dll")] public static extern short GetAsyncKeyState(int key);
@@ -96,6 +98,7 @@ internal sealed class TextTarget
     private int[]? runtimeId;
     private bool protectedField;
     private string? insertedText, documentSnapshot;
+    private TextPatternRange? insertionRange;
     public static TextTarget Capture()
     {
         var target = new TextTarget { Window = Native.GetForegroundWindow() };
@@ -144,7 +147,7 @@ internal sealed class TextTarget
     // Unsupported editors still offer a copyable preview.
     public void RememberInsertion(string text)
     {
-        insertedText = null; documentSnapshot = null;
+        insertedText = null; documentSnapshot = null; insertionRange = null;
         try
         {
             var pattern = TextPattern();
@@ -164,6 +167,32 @@ internal sealed class TextTarget
     {
         try { return insertedText != null && documentSnapshot != null && TextPattern()?.DocumentRange.GetText(32001) == documentSnapshot; }
         catch { return false; }
+    }
+    // True when both ends of the line hit-test to the field's window, so a marker never draws over another app.
+    // Click-through layered windows, such as the marker itself, are skipped by hit-testing.
+    public bool IsUncovered(Rectangle line)
+    {
+        var y = line.Top + line.Height / 2;
+        var inset = Math.Min(4, line.Width / 2);
+        return OwnsPoint(line.Left + inset, y) && OwnsPoint(line.Right - 1 - inset, y);
+    }
+    private bool OwnsPoint(int x, int y) => Window != IntPtr.Zero && Native.GetAncestor(Native.WindowFromPoint(new Native.POINT { X = x, Y = y }), 2 /* GA_ROOT */) == Window;
+    // Screen bounds of each visible line of the dictation, clipped to the field. Empty once the field changes.
+    public Rectangle[] InsertionLineBounds()
+    {
+        try
+        {
+            if (!CanReplaceInsertion()) return Array.Empty<Rectangle>();
+            insertionRange ??= TextPattern()?.DocumentRange.FindText(insertedText!, false, false);
+            if (insertionRange == null || insertionRange.GetText(-1) != insertedText) { insertionRange = null; return Array.Empty<Rectangle>(); }
+            var field = element!.Current.BoundingRectangle;
+            return insertionRange.GetBoundingRectangles()
+                .Select(line => System.Windows.Rect.Intersect(line, field))
+                .Where(line => !line.IsEmpty && line.Width >= 1 && line.Height >= 4)
+                .Select(line => Rectangle.FromLTRB((int)Math.Floor(line.Left), (int)Math.Floor(line.Top), (int)Math.Ceiling(line.Right), (int)Math.Ceiling(line.Bottom)))
+                .ToArray();
+        }
+        catch { insertionRange = null; return Array.Empty<Rectangle>(); }
     }
     public async Task<bool> ReplaceInsertionAsync(string text, CancellationToken ct)
     {

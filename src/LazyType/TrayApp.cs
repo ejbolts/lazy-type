@@ -8,6 +8,7 @@ internal sealed class TrayApp : ApplicationContext
     private readonly MainForm form = new();
     private readonly RecordingOverlay overlay = new();
     private readonly SuggestionBadge suggestionBadge = new();
+    private readonly TextHighlight highlight = new();
     private SuggestionForm? suggestionForm;
     private TextTarget? suggestionTarget;
     private readonly EngineHost engines = new();
@@ -272,6 +273,7 @@ internal sealed class TrayApp : ApplicationContext
     private void CloseSuggestion()
     {
         suggestionBadge.Dismiss(); suggestionTarget = null;
+        highlight.Dismiss();
         suggestionForm?.Close();
     }
 
@@ -302,6 +304,8 @@ internal sealed class TrayApp : ApplicationContext
             if (suggesting) Cancel();
         };
         preview.ApplyRequested += () => _ = ApplySuggestionAsync(preview, source, destination);
+        // Mark the dictated text in the field first so the preview stays above the marker.
+        if (destination != null) highlight.Present(destination);
         preview.Show();
         processing = true; suggesting = true; form.SetSuggestionBusy(true); EscapeEnabled(true);
         var id = ++generation;
@@ -315,7 +319,10 @@ internal sealed class TrayApp : ApplicationContext
             var text = await engines.SuggestAsync(source, ct);
             ct.ThrowIfCancellationRequested();
             if (suggestionForm == preview && form.Result.Text == source)
+            {
                 preview.ShowSuggestion(text, text != source, destination == null || destination.CanReplaceInsertion());
+                highlight.Settle();
+            }
             Status("Suggestion ready · models unloaded", "Review the suggestion before applying. Your original transcript is still available.");
         }
         catch (OperationCanceledException) { }
@@ -324,6 +331,7 @@ internal sealed class TrayApp : ApplicationContext
             if (!ct.IsCancellationRequested && suggestionForm == preview)
             {
                 preview.ShowFailure("Suggestion unavailable. Your text is unchanged. Close and try again.");
+                highlight.Settle();
                 Status("Suggestion unavailable · models unloaded", e.Message);
                 AppLog.Write("Suggestion failed: " + e.GetType().Name);
             }
@@ -424,7 +432,7 @@ internal sealed class TrayApp : ApplicationContext
     {
         if (closing) return;
         closing = true; shutdown.Cancel(); operation?.Cancel(); lifetime.Cancel();
-        suggesting = false; suggestionForm?.Close(); suggestionBadge.Dispose();
+        suggesting = false; suggestionForm?.Close(); suggestionBadge.Dispose(); highlight.Dispose();
         mic?.Dispose(); themes.Dispose(); overlay.Dispose(); engines.Dispose();
         for (var id = 1; id <= 4; id++) Native.UnregisterHotKey(form.Handle, id);
         tray.Visible = false; tray.Icon?.Dispose(); tray.Dispose(); form.Quitting = true; form.Close(); form.Dispose();

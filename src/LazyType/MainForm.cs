@@ -99,17 +99,13 @@ internal sealed class MainForm : Form
         // --- 2. Interactive Dictation Shortcut Card ---
         shortcutCard.Dock = DockStyle.Top;
         shortcutCard.Height = 52;
-        shortcutCard.Cursor = Cursors.Hand;
         shortcutCard.Paint += PaintShortcutCard;
-        shortcutCard.Click += (_, _) => CycleHotkey();
 
         shortcutAction.Text = "Start or stop dictation";
         shortcutAction.Font = new Font("Segoe UI", 9.5f, FontStyle.Regular);
         shortcutAction.Dock = DockStyle.Right;
         shortcutAction.Width = 180;
         shortcutAction.TextAlign = ContentAlignment.MiddleRight;
-        shortcutAction.Cursor = Cursors.Hand;
-        shortcutAction.Click += (_, _) => CycleHotkey();
         shortcutCard.Controls.Add(shortcutAction);
 
         // --- 3. Settings Rows ---
@@ -269,7 +265,7 @@ internal sealed class MainForm : Form
         root.Controls.Add(footerBar);
 
         // Setup hidden combos for ThemeController compatibility & settings menu
-        HotkeyChoice.Items.AddRange(new object[] { "Ctrl+Alt+Space", "Ctrl+Shift+Space", "F8" });
+        HotkeyChoice.Items.Add("Ctrl+Alt+Space");
         ThemeChoice.Items.AddRange(new object[] { "System", "Light", "Dark" });
         PopupThemeChoice.Items.AddRange(new object[] { "Follow app", "Light", "Dark" });
 
@@ -281,12 +277,7 @@ internal sealed class MainForm : Form
         FormClosing += (_, e) => { if (!Quitting) { e.Cancel = true; Hide(); } };
     }
 
-    private void CycleHotkey()
-    {
-        if (HotkeyChoice.Items.Count == 0) return;
-        int next = (HotkeyChoice.SelectedIndex + 1) % HotkeyChoice.Items.Count;
-        HotkeyChoice.SelectedIndex = next;
-    }
+
 
     private Color GetIconColor() => isDark ? Color.FromArgb(170, 180, 200) : Color.FromArgb(102, 112, 133);
 
@@ -404,9 +395,7 @@ internal sealed class MainForm : Form
             }
         }
 
-        int divX = shortcutCard.Width - 190;
-        using var divPen = new Pen(cardBorder, 1f);
-        g.DrawLine(divPen, divX, y + 2, divX, y + 24);
+
     }
 
     private void PaintResultCard(object? sender, PaintEventArgs e)
@@ -448,15 +437,7 @@ internal sealed class MainForm : Form
 
         settingsMenu.Items.Add(new ToolStripSeparator());
 
-        var hotkeyHeader = new ToolStripMenuItem("Dictation shortcut") { Enabled = false };
-        settingsMenu.Items.Add(hotkeyHeader);
-        foreach (string hk in new[] { "Ctrl+Alt+Space", "Ctrl+Shift+Space", "F8" })
-        {
-            var item = new ToolStripMenuItem("  " + hk, null, (_, _) => { HotkeyChoice.SelectedItem = hk; });
-            settingsMenu.Items.Add(item);
-        }
 
-        settingsMenu.Items.Add(new ToolStripSeparator());
 
         settingsMenu.Items.Add("Preview suggestion popup", null, (_, _) => PreviewPopupRequested?.Invoke());
         settingsMenu.Items.Add("Test with WAV audio…", null, (_, _) => ImportRequested?.Invoke());

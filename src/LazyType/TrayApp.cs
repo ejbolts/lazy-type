@@ -208,6 +208,7 @@ internal sealed class TrayApp : ApplicationContext
             catch (Exception) when (!ct.IsCancellationRequested) { fallback = true; AppLog.Write("Cleanup failed; original transcript retained."); }
         }
         ct.ThrowIfCancellationRequested(); form.Result.Text = result;
+        Native.SetClipboardText(result);
         // Inference is finished; release GPU allocations before clipboard insertion.
         engines.Stop();
         overlay.Dismiss();

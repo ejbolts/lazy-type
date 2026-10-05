@@ -53,6 +53,22 @@ internal static class Native
         var keys = new[] { Key(0x11, false), Key(0x56, false), Key(0x56, true), Key(0x11, true) };
         if (SendInput(4, keys, Marshal.SizeOf<INPUT>()) != 4) throw new InvalidOperationException("Windows blocked text insertion. Copy the result below and paste it manually.");
     }
+    public static bool SetClipboardText(string text)
+    {
+        for (var i = 0; i < 5; i++)
+        {
+            try
+            {
+                Clipboard.SetDataObject(text, copy: true, retryTimes: 5, retryDelay: 40);
+                return true;
+            }
+            catch
+            {
+                Thread.Sleep(40);
+            }
+        }
+        return false;
+    }
     public static bool ModifiersDown => new[] { 0x10, 0x11, 0x12 }.Any(k => (GetAsyncKeyState(k) & 0x8000) != 0);
     public static Icon MakeIcon(Color color)
     {
@@ -184,27 +200,12 @@ internal sealed class TextTarget
         for (var i = 0; i < 40 && Native.ModifiersDown; i++) await Task.Delay(25, ct);
         ct.ThrowIfCancellationRequested();
         if (Native.ModifiersDown || !IsCurrent()) return false;
-        IDataObject? previous;
-        try { previous = Clipboard.GetDataObject(); }
-        catch { return false; }
-        uint ownedSequence = 0;
-        try
-        {
-            Clipboard.SetText(text);
-            ownedSequence = Native.GetClipboardSequenceNumber();
-            ct.ThrowIfCancellationRequested();
-            if (!IsCurrent() || validateSelection?.Invoke() == false) return false;
-            Native.Paste();
-            // Keep clipboard available long enough for rich editors to consume it.
-            await Task.Delay(1200);
-            return true;
-        }
-        finally
-        {
-            // Never overwrite something the user copied while we were pasting.
-            if (ownedSequence != 0 && Native.GetClipboardSequenceNumber() == ownedSequence)
-                try { if (previous != null) Clipboard.SetDataObject(previous, true); else Clipboard.Clear(); } catch { }
-        }
+        if (!Native.SetClipboardText(text)) return false;
+        ct.ThrowIfCancellationRequested();
+        if (!IsCurrent() || validateSelection?.Invoke() == false) return false;
+        Native.Paste();
+        await Task.Delay(50);
+        return true;
     }
 }
 

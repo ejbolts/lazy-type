@@ -198,9 +198,8 @@ internal sealed class SuggestionForm : Form
         copy.IconDrawAction = (g, rect, col) => VectorIcons.DrawCopy(g, rect, col);
         copy.Click += (_, _) =>
         {
-            if (!string.IsNullOrEmpty(suggestion.Text))
+            if (!string.IsNullOrEmpty(suggestion.Text) && Native.SetClipboardText(suggestion.Text))
             {
-                try { Clipboard.SetText(suggestion.Text); } catch { }
                 copy.Text = "Copied!";
                 copyResetTimer.Stop();
                 copyResetTimer.Start();

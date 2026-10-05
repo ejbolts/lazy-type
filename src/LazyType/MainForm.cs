@@ -162,9 +162,8 @@ internal sealed class MainForm : Form
         copyBtn.IconDrawAction = (g, rect, col) => VectorIcons.DrawCopy(g, rect, col);
         copyBtn.Click += (_, _) =>
         {
-            if (!string.IsNullOrEmpty(Result.Text))
+            if (!string.IsNullOrEmpty(Result.Text) && Native.SetClipboardText(Result.Text))
             {
-                try { Clipboard.SetText(Result.Text); } catch { }
                 copyBtn.Text = "Copied!";
                 copyFeedbackTimer.Stop();
                 copyFeedbackTimer.Start();

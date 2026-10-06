@@ -129,7 +129,7 @@ internal sealed class TrayApp : ApplicationContext
     private void SetBusy(bool busy)
     {
         form.SetSuggestionBusy(busy);
-        form.Models.Enabled = !recording && !processing;
+        form.Models.Locked = recording || processing;
     }
     private void UI(Action action) { if (!closing && !form.IsDisposed) try { if (form.InvokeRequired) form.BeginInvoke(action); else action(); } catch { } }
     private void Status(string title, string explanation)

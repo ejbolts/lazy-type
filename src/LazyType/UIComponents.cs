@@ -382,6 +382,12 @@ internal sealed class ModernCheckBox : CheckBox
         Color checkColor = Color.White;
 
         Color currentBorder = (hovered || Focused) ? borderHover : borderNormal;
+        if (!Enabled)
+        {
+            // Locked but still legible: a softer fill and border instead of the system's disabled grey.
+            bgChecked = isDark ? Color.FromArgb(84, 66, 138) : Color.FromArgb(196, 178, 238);
+            currentBorder = isDark ? Color.FromArgb(52, 61, 78) : Color.FromArgb(226, 230, 237);
+        }
 
         if (Checked)
         {

@@ -3,8 +3,9 @@ namespace LazyType;
 internal sealed class ModelSelector : UserControl
 {
     private readonly Dictionary<string, ModernCheckBox> boxes = new();
+    private readonly List<Label> labels = new();
     private readonly Label detail = new() { Dock = DockStyle.Bottom, Height = 22, AutoEllipsis = true };
-    private bool updating;
+    private bool updating, locked, dark;
     private string selected = TextModels.Current;
     public event Action? SelectionChanged;
     public string SelectedModel
@@ -20,6 +21,20 @@ internal sealed class ModelSelector : UserControl
             finally { updating = false; }
             SetStatus("Models unloaded");
             if (changed) SelectionChanged?.Invoke();
+        }
+    }
+    // Locks the choice while recording or editing. Disabling the whole control would draw its labels in the
+    // system's disabled grey, which is unreadable on the dark theme, so only the checkboxes are disabled.
+    public bool Locked
+    {
+        get => locked;
+        set
+        {
+            if (locked == value) return;
+            locked = value;
+            foreach (var box in boxes.Values) { box.Enabled = !value; box.Cursor = value ? Cursors.Default : Cursors.Hand; }
+            foreach (var label in labels) label.Cursor = value ? Cursors.Default : Cursors.Hand;
+            ApplyColors();
         }
     }
     public ModelSelector()
@@ -40,8 +55,8 @@ internal sealed class ModelSelector : UserControl
                 Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft, Cursor = Cursors.Hand };
             var row = new Panel { Dock = DockStyle.Fill, Margin = Padding.Empty };
             row.Controls.Add(label); row.Controls.Add(box);
-            boxes.Add(model, box);
-            label.Click += (_, _) => { if (Enabled) SelectedModel = model; };
+            boxes.Add(model, box); labels.Add(label);
+            label.Click += (_, _) => { if (Enabled && !locked) SelectedModel = model; };
             box.CheckedChanged += (_, _) => { if (!updating) SelectedModel = model; };
             choices.Controls.Add(row, i % 2, i / 2);
         }
@@ -53,7 +68,15 @@ internal sealed class ModelSelector : UserControl
         : status;
     public void ApplyTheme(bool dark)
     {
+        this.dark = dark;
         foreach (var box in boxes.Values) box.IsDark = dark;
-        detail.ForeColor = dark ? Color.FromArgb(150, 165, 185) : Color.FromArgb(100, 116, 139);
+        ApplyColors();
+    }
+    private void ApplyColors()
+    {
+        var muted = dark ? Color.FromArgb(150, 165, 185) : Color.FromArgb(100, 116, 139);
+        detail.ForeColor = muted;
+        // Empty inherits the form's text colour; locked choices are muted but stay readable.
+        foreach (var label in labels) label.ForeColor = locked ? muted : Color.Empty;
     }
 }

@@ -30,6 +30,22 @@ internal static class Program
             }
             passed++; Console.WriteLine("PASS Mutually exclusive native checkbox controls");
         }
+        using (var form = new Form { ForeColor = Color.FromArgb(240, 242, 248) })
+        {
+            var selector = new ModelSelector(); form.Controls.Add(selector); selector.ApplyTheme(true);
+            selector.SelectedModel = TextModels.Dynamic;
+            var labels = selector.Controls.Cast<Control>().SelectMany(Descendants).OfType<Label>().Where(l => TextModels.Choices.Any(l.Text.StartsWith)).ToArray();
+            var boxes = selector.Controls.Cast<Control>().SelectMany(Descendants).OfType<CheckBox>().ToArray();
+            selector.Locked = true;
+            Check(selector.Enabled && labels.Length == 4 && labels.All(l => l.Enabled && l.ForeColor == Color.FromArgb(150, 165, 185)), "Locked labels stay enabled and readable");
+            Check(boxes.All(b => !b.Enabled), "Locked checkboxes are disabled");
+            labels.Single(l => l.Text == TextModels.Gemma).GetType().GetMethod("OnClick", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+                .Invoke(labels.Single(l => l.Text == TextModels.Gemma), new object[] { EventArgs.Empty });
+            Check(selector.SelectedModel == TextModels.Dynamic, "Locked label click cannot change the model");
+            selector.Locked = false;
+            Check(labels.All(l => l.ForeColor == form.ForeColor) && boxes.All(b => b.Enabled), "Unlocked labels inherit the theme colour");
+            passed++; Console.WriteLine("PASS Locked model choice stays readable");
+        }
         SynchronizationContext.SetSynchronizationContext(null);
         if (args.Contains("--integration")) await Integration(args);
         else await Unit();

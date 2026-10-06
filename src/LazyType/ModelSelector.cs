@@ -5,9 +5,11 @@ internal sealed class ModelSelector : UserControl
     private readonly Dictionary<string, ModernCheckBox> boxes = new();
     private readonly List<Label> labels = new();
     private readonly Label detail = new() { Dock = DockStyle.Bottom, Height = 22, AutoEllipsis = true };
+    private readonly ModernButton usage = new();
     private bool updating, locked, dark;
     private string selected = TextModels.Current;
     public event Action? SelectionChanged;
+    public event Action? UsageRequested;
     public string SelectedModel
     {
         get => selected;
@@ -39,9 +41,18 @@ internal sealed class ModelSelector : UserControl
     }
     public ModelSelector()
     {
-        Height = 108;
+        Height = 114;
         detail.Font = new Font("Segoe UI", 8.5f);
-        var title = new Label { Text = "Text model", Dock = DockStyle.Top, Height = 24, Font = new Font("Segoe UI", 10f, FontStyle.Bold) };
+        var header = new Panel { Dock = DockStyle.Top, Height = 30, Padding = new Padding(0, 0, 0, 4) };
+        var title = new Label { Text = "Text model", Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft, Font = new Font("Segoe UI", 10f, FontStyle.Bold) };
+        // Opens Model usage from the main window; usage stays available while the choice is locked.
+        usage.Text = "Usage"; usage.AccessibleName = "Model usage";
+        usage.Style = ModernButton.ButtonStyle.Secondary; usage.CornerRadius = 6;
+        usage.Font = new Font("Segoe UI", 8.5f);
+        usage.Dock = DockStyle.Right; usage.Width = 84;
+        usage.IconDrawAction = (g, rect, col) => VectorIcons.DrawUsage(g, rect, col);
+        usage.Click += (_, _) => UsageRequested?.Invoke();
+        header.Controls.Add(title); header.Controls.Add(usage);
         var choices = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 2, Margin = Padding.Empty };
         choices.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
         choices.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
@@ -60,7 +71,7 @@ internal sealed class ModelSelector : UserControl
             box.CheckedChanged += (_, _) => { if (!updating) SelectedModel = model; };
             choices.Controls.Add(row, i % 2, i / 2);
         }
-        Controls.Add(choices); Controls.Add(title); Controls.Add(detail);
+        Controls.Add(choices); Controls.Add(header); Controls.Add(detail);
         SetStatus("Models unloaded");
     }
     public void SetStatus(string status) => detail.Text = status == "Models unloaded"
@@ -70,6 +81,7 @@ internal sealed class ModelSelector : UserControl
     {
         this.dark = dark;
         foreach (var box in boxes.Values) box.IsDark = dark;
+        usage.IsDark = dark;
         ApplyColors();
     }
     private void ApplyColors()

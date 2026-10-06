@@ -33,19 +33,29 @@ public sealed class ModelUsage
     // Spoken words, so "3:30" and "state-of-the-art" are one word each.
     internal static int CountWords(string text) => Regex.Matches(text, @"\S+").Count(m => m.Value.Any(char.IsLetterOrDigit));
 
-    public static ModelUsage Load()
+    // Loaded at startup and saved after every count, so totals carry over between restarts.
+    public static ModelUsage Load(string? path = null)
     {
-        try { return JsonSerializer.Deserialize<ModelUsage>(File.ReadAllText(UsageFile)) ?? new(); }
-        catch { return new(); }
+        path ??= UsageFile;
+        if (!File.Exists(path)) return new();
+        try { return JsonSerializer.Deserialize<ModelUsage>(File.ReadAllText(path)) ?? new(); }
+        catch (Exception e)
+        {
+            // Keep an unreadable file instead of overwriting it with fresh counts.
+            try { File.Move(path, path + ".unreadable", true); } catch { }
+            AppLog.Write("Model usage could not be read (" + e.GetType().Name + "); counting again from now.");
+            return new();
+        }
     }
-    public void Save()
+    public void Save(string? path = null)
     {
+        path ??= UsageFile;
         try
         {
-            Directory.CreateDirectory(AppSettings.Root);
-            var temp = UsageFile + ".tmp";
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            var temp = path + ".tmp";
             File.WriteAllText(temp, JsonSerializer.Serialize(this, new JsonSerializerOptions { WriteIndented = true }));
-            File.Move(temp, UsageFile, true);
+            File.Move(temp, path, true);
         }
         catch (Exception e) { AppLog.Write("Model usage could not be saved (" + e.GetType().Name + ")."); }
     }

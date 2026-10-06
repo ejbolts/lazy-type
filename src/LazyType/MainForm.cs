@@ -258,6 +258,7 @@ internal sealed class MainForm : Form
         // Assemble root layout
         root.Controls.Add(resultCard);
         Models.Dock = DockStyle.Top;
+        Models.UsageRequested += () => UsageRequested?.Invoke();
         root.Controls.Add(Models);
         root.Controls.Add(settingsContainer);
         root.Controls.Add(shortcutCard);

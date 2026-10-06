@@ -146,6 +146,23 @@ internal static class Program
             loaded.Reset(); Check(loaded.Dictations == 0 && loaded.Since >= usage.Since);
             return Task.CompletedTask;
         });
+        await Test("Model usage persists across restarts and keeps an unreadable file", () =>
+        {
+            var folder = Path.Combine(Path.GetTempPath(), "lazytype-usage-" + Guid.NewGuid().ToString("N"));
+            try
+            {
+                var file = Path.Combine(folder, "usage.json");
+                Check(ModelUsage.Load(file).Dictations == 0, "Missing file starts empty");
+                var first = ModelUsage.Load(file); first.Record(TextModels.Gemma, true, "one two three"); first.Save(file);
+                var second = ModelUsage.Load(file); second.Record(TextModels.Current, false, "four"); second.Save(file);
+                var third = ModelUsage.Load(file);
+                Check(third.Dictations == 2 && third.Words == 4 && third.Since == first.Since && !File.Exists(file + ".tmp"), "Counts accumulate across loads");
+                File.WriteAllText(file, "{ not json");
+                Check(ModelUsage.Load(file).Dictations == 0 && File.Exists(file + ".unreadable") && !File.Exists(file), "Corrupt file is set aside");
+            }
+            finally { if (Directory.Exists(folder)) Directory.Delete(folder, true); }
+            return Task.CompletedTask;
+        });
         await Test("Dash cleanup preserves paragraphs, flags, hyphens and ranges", () =>
         {
             foreach (var text in new[] { "First.\n\nNext.", "Run --dry-run and --output=file.", "Use state-of-the-art tools.", "The range is 3–5 and 3-5.", "The value is -5." }) Check(EngineHost.CleanPauseDashes(text) == text, text);

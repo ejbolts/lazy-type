@@ -126,9 +126,14 @@ internal sealed class EngineHost : IDisposable
         text = System.Text.RegularExpressions.Regex.Replace(text, @"[ ]{2,}", " ");
         return text.Trim();
     }
-    public async Task<string> CleanupAsync(string raw, CancellationToken ct) => CleanPauseDashes(await EditAsync(raw, CleanupPrompt, false, ct));
-    public async Task<string> SuggestAsync(string raw, CancellationToken ct) => CleanPauseDashes(await EditAsync(raw, SuggestionPrompt, true, ct));
-    private async Task<string> EditAsync(string raw, string prompt, bool suggestion, CancellationToken ct)
+    // Model is the worker that produced the edit, which can differ from the selection in Dynamic mode.
+    public async Task<(string Text, string Model)> CleanupAsync(string raw, CancellationToken ct)
+    {
+        var (text, model) = await EditAsync(raw, CleanupPrompt, false, ct);
+        return (CleanPauseDashes(text), model);
+    }
+    public async Task<string> SuggestAsync(string raw, CancellationToken ct) => CleanPauseDashes((await EditAsync(raw, SuggestionPrompt, true, ct)).Text);
+    private async Task<(string Text, string Model)> EditAsync(string raw, string prompt, bool suggestion, CancellationToken ct)
     {
         if (suggestion && (string.IsNullOrWhiteSpace(raw) || raw.Length > 6000))
             throw new InvalidOperationException("Suggestions work with up to 6,000 characters. Shorten the result and try again.");
@@ -162,7 +167,7 @@ internal sealed class EngineHost : IDisposable
             error.Data["cleanupResult"] = text;
             throw error;
         }
-        return text;
+        return (text, lease.Worker.Model);
     }
     internal static bool PlausibleCleanup(string raw, string text) => text.Length > 0 && text.Length <= raw.Length * 2 + 80 && (raw.Length < 100 || text.Length >= raw.Length * 0.3) && !text.Contains("<think>");
     internal static bool PreservesNumbers(string raw, string text)

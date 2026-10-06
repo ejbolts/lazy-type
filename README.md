@@ -37,6 +37,12 @@ python scripts/setup_models.py --text-model all
 
 Use `--text-model qwen35`, `gemma`, or `dynamic` to install only the corresponding additional weights, or pass `-TextModel all` to `scripts/install.ps1`. Defaults still download the current model only. Pinned Q4_K_M files are approximately 5.68 GB for Qwen3.5 and 7.12 GB for Gemma. Existing benchmark downloads under `benchmarks/*/models` are reused without copying them. Selecting a model does not download it; a missing manual model is reported when used. All text models run with thinking disabled for bounded editing responses.
 
+## Model usage
+
+Open the gear menu (or the tray menu) and choose **Model usage** to see how often each text model has cleaned your dictation. Each cleaned dictation counts once, for the model that actually edited it: in **Dynamic**, that is Qwen before the handover and Gemma after it. Manual selections count the same way. Each model shows its share of all dictations, the words you spoke to it, the average words per dictation, and how many came from Dynamic or a manual choice.
+
+Raw dictations, failed cleanups and wording checks are not counted. Counts update live while the window is open. **Reset counts** clears them after confirmation. Only counts are saved, in `usage.json`; your words are never stored. Isolated test sessions keep their counts in memory only.
+
 ## AI suggestions
 
 Turn on **AI suggestions · check wording after dictation** in the main window. It is off by default and saved separately from speech cleanup.
@@ -70,7 +76,7 @@ The marks and bar never take focus, so you can keep typing. Labels sit on whiche
 - Silero VAD filters silence before transcription.
 - Native CUDA engines use the NVIDIA GPU. Each text worker has a 4,096-token context and a single processing slot to bound memory use.
 - No cloud transcription or cleanup; the only inference connections are loopback connections on this PC. The text server uses a per-session authentication key.
-- Recordings are processed in memory. The last original and edited transcript are kept in the app until exit. There is no persistent transcript history.
+- Recordings are processed in memory. The last original and edited transcript are kept in the app until exit. There is no persistent transcript history; model usage stores counts only.
 - Operational logs exclude dictated content. Model files, runtime archives, settings and logs are stored in `%USERPROFILE%\Applications\LazyType`.
 - Model workers are attached to a Windows job so closing/crashing the app also terminates its workers. The app never runs as administrator.
 

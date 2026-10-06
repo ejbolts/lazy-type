@@ -114,6 +114,22 @@ internal static class Program
         });
         await Test("Repeated stop/dispose and restart leak no fake workers", async () =>
         { using var r = new Rig(); for (var i = 0; i < 20; i++) { await r.Host.EnsureReadyAsync(default); r.Host.Stop(); r.Host.Stop(); Check(r.Host.WorkerCount == 0); } r.Host.Dispose(); r.Host.Dispose(); await Throws(() => r.Host.EnsureReadyAsync(default)); Check(r.Workers.All(w => w.Disposed)); });
+        await Test("Model usage counts each cleanup per model, mode and words; survives save format; resets", () =>
+        {
+            var usage = new ModelUsage();
+            Check(usage.Dictations == 0 && usage.For(TextModels.Gemma).Dictations == 0);
+            usage.Record(TextModels.Current, true, "Um, send the report at 3:30, okay?");
+            usage.Record(TextModels.Gemma, true, "It's state-of-the-art work.");
+            usage.Record(TextModels.Current, false, "");
+            Check(usage.For(TextModels.Current) is { Dynamic: 1, Manual: 1, Dictations: 2, Words: 7 }, "Qwen counts");
+            Check(usage.For(TextModels.Gemma) is { Dynamic: 1, Manual: 0, Words: 3 } && usage.Dictations == 3 && usage.Words == 10, "Gemma counts");
+            var json = JsonSerializer.Serialize(usage);
+            Check(!json.Contains("Dictations") && !json.Contains("report"), "Only counts are stored");
+            var loaded = JsonSerializer.Deserialize<ModelUsage>(json)!;
+            Check(loaded.Dictations == 3 && loaded.Since == usage.Since && loaded.For(TextModels.Gemma).Words == 3, "Round-trip");
+            loaded.Reset(); Check(loaded.Dictations == 0 && loaded.Since >= usage.Since);
+            return Task.CompletedTask;
+        });
         await Test("Dash cleanup preserves paragraphs, flags, hyphens and ranges", () =>
         {
             foreach (var text in new[] { "First.\n\nNext.", "Run --dry-run and --output=file.", "Use state-of-the-art tools.", "The range is 3–5 and 3-5.", "The value is -5." }) Check(EngineHost.CleanPauseDashes(text) == text, text);
@@ -135,7 +151,7 @@ internal static class Program
                 if (audioIndex >= 0) { var transcript = await host.TranscribeAsync(File.ReadAllBytes(args[audioIndex + 1]), default); Check(transcript.Contains("country", StringComparison.OrdinalIgnoreCase), "Public audio transcription"); }
                 foreach (var source in new[] { "Um, please send the report at 3:30 on 2026-10-05.", "Run --dry-run.\n\nKeep the output in report.txt." })
                 {
-                    var cleaned = await host.CleanupAsync(source, default); Check(EngineHost.PreservesNumbers(source, cleaned));
+                    var (cleaned, editor) = await host.CleanupAsync(source, default); Check(editor == model, "Cleanup reports its model"); Check(EngineHost.PreservesNumbers(source, cleaned));
                     var polished = await host.SuggestAsync(source, default); Check(EngineHost.PreservesNumbers(source, polished));
                     if (source.Contains("--dry-run")) Check(cleaned.Contains("--dry-run") && polished.Contains("--dry-run") && cleaned.Contains('\n') && polished.Contains('\n'), "Flags/paragraphs preserved end to end");
                 }
@@ -154,8 +170,8 @@ internal static class Program
             await host.UpgradeTask; Check(host.ActiveTextModel == TextModels.Gemma);
             Check(!edit.IsCompleted, "An actual Qwen edit must still be running at promotion");
             Check(host.TextWorkerCount == 2, "Qwen remains resident for its active request");
-            var shortEdit = await host.CleanupAsync("Um, send the report at 3:30.", default); Check(shortEdit.Contains("3:30"));
-            var originalEdit = await edit; Check(EngineHost.PreservesNumbers(longText, originalEdit));
+            var shortEdit = await host.CleanupAsync("Um, send the report at 3:30.", default); Check(shortEdit.Text.Contains("3:30") && shortEdit.Model == TextModels.Gemma, "New edits report Gemma");
+            var originalEdit = await edit; Check(EngineHost.PreservesNumbers(longText, originalEdit.Text) && originalEdit.Model == TextModels.Current, "In-flight edit reports Qwen");
             await Until(() => host.TextWorkerCount == 1); host.Stop(); Check(host.TextWorkerCount == 0);
         });
         await Test("REAL stop during primary loading and immediate restart", async () =>

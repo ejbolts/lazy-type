@@ -51,6 +51,9 @@ internal sealed class TrayApp : ApplicationContext
         form.Mic.SelectedIndex = Math.Max(0, devices.FindIndex(d => d.Id == settings.Microphone));
         settings.Microphone = devices[form.Mic.SelectedIndex].Id;
         form.Clean.Checked = settings.Cleanup;
+        settings.EditMode = TextEditModes.Normalize(settings.EditMode);
+        form.EditModeChoice.SelectedItem = settings.EditMode;
+        form.EditModeChoice.SelectedIndexChanged += (_, _) => { settings.EditMode = form.EditModeChoice.SelectedItem!.ToString()!; SaveSettings(); };
         form.Startup.Checked = !testSession && AppSettings.Startup;
         form.Startup.Enabled = !testSession;
         form.Suggestions.Checked = settings.Suggestions;
@@ -74,6 +77,7 @@ internal sealed class TrayApp : ApplicationContext
             if (!settings.Suggestions) CloseSuggestion();
         };
         form.SuggestionRequested += () => _ = SuggestAsync(null);
+        form.RewriteRequested += mode => _ = SuggestAsync(null, editMode: mode);
         form.Result.TextChanged += (_, _) => { if (!updatingResult) CloseSuggestion(); };
         highlight.ChangeClicked += index => _ = ApplyChangeAsync(index);
         form.Startup.CheckedChanged += (_, _) => { try { AppSettings.Startup = form.Startup.Checked; } catch (Exception e) { Report(e); } };
@@ -232,8 +236,9 @@ internal sealed class TrayApp : ApplicationContext
         var result = transcript; var fallback = false;
         if (!raw)
         {
-            overlay.Present("Cleaning up…"); Status("Cleaning up your wording", "Microphone off · Editing locally");
-            try { result = await engines.CleanupAsync(transcript, ct); }
+            overlay.Present(settings.EditMode == TextEditModes.Reword ? "Rewording…" : "Cleaning up…");
+            Status(settings.EditMode == TextEditModes.Reword ? "Rewording your speech" : "Cleaning up your wording", "Microphone off · Editing locally");
+            try { result = await engines.RewriteAsync(transcript, settings.EditMode, ct); }
             catch (Exception) when (!ct.IsCancellationRequested)
             {
                 fallback = true;
@@ -312,13 +317,14 @@ internal sealed class TrayApp : ApplicationContext
 
     // automatic: run straight after dictation. The preview only appears, without taking focus, when there
     // is something to change; otherwise it closes quietly.
-    private async Task SuggestAsync(TextTarget? destination, bool automatic = false)
+    private async Task SuggestAsync(TextTarget? destination, bool automatic = false, string? editMode = null)
     {
-        if (!settings.Suggestions || recording || processing || paused || closing || string.IsNullOrWhiteSpace(form.Result.Text)) return;
+        if ((editMode == null && !settings.Suggestions) || recording || processing || paused || closing || string.IsNullOrWhiteSpace(form.Result.Text)) return;
         var source = form.Result.Text;
         CloseSuggestion();
         var popupDark = ThemeController.Resolve(settings.PopupTheme, ThemeController.Resolve(settings.Theme, ThemeController.IsSystemDark));
-        var preview = new SuggestionForm(source, destination != null, popupDark) { Passive = automatic };
+        var preview = new SuggestionForm(source, destination != null, popupDark, editMode) { Passive = automatic };
+        if (editMode != null) form.Original.Text = source;
         suggestionForm = preview;
         var anchor = destination != null && destination.TryGetBounds(out var field) ? field : form.Bounds;
         void PositionPreview()
@@ -348,12 +354,12 @@ internal sealed class TrayApp : ApplicationContext
         var id = ++generation;
         using var currentOperation = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);
         operation = currentOperation; var ct = currentOperation.Token;
-        Status("Suggesting clearer wording", "Microphone off · Editing locally · Esc cancels");
+        Status(editMode == TextEditModes.Reword ? "Rewording your text" : editMode == TextEditModes.Cleanup ? "Cleaning up your text" : "Suggesting clearer wording", "Microphone off · Editing locally · Esc cancels");
         try
         {
-            if (source.Length > 6000) throw new InvalidOperationException("Suggestions support up to 6,000 characters. Shorten the result and try again.");
+            if (source.Length > 6000) throw new InvalidOperationException((editMode ?? "Suggestions") + " supports up to 6,000 characters. Shorten the result and try again.");
             await engines.EnsureTextReadyAsync(ct);
-            var text = await engines.SuggestAsync(source, ct);
+            var text = editMode == null ? await engines.SuggestAsync(source, ct) : await engines.RewriteAsync(source, editMode, ct);
             ct.ThrowIfCancellationRequested();
             if (suggestionForm == preview && form.Result.Text == source)
             {
@@ -380,7 +386,8 @@ internal sealed class TrayApp : ApplicationContext
             }
             else if (!ct.IsCancellationRequested && suggestionForm == preview)
             {
-                preview.ShowFailure("Suggestion unavailable. Your text is unchanged. Close and try again.");
+                preview.ShowFailure(source.Length > 6000 ? (editMode ?? "Suggestions") + " supports up to 6,000 characters. Shorten the result and try again. Your text is unchanged."
+                    : (editMode ?? "Suggestion") + " unavailable. Your text is unchanged. Close and try again.");
                 highlight.Dismiss();
                 Status("Suggestion unavailable · models unloaded", e.Message);
                 AppLog.Write("Suggestion failed: " + e.GetType().Name);
@@ -459,7 +466,7 @@ internal sealed class TrayApp : ApplicationContext
     private async Task ApplySuggestionAsync(SuggestionForm preview, TextTarget? destination)
     {
         var source = suggestionSource;
-        if (processing || suggestionForm != preview || source == null || form.Result.Text != source || !settings.Suggestions) return;
+        if (processing || suggestionForm != preview || source == null || form.Result.Text != source || (destination != null && !settings.Suggestions)) return;
         var text = preview.SuggestedText;
         if (string.IsNullOrWhiteSpace(text)) return;
         if (destination == null)

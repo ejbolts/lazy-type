@@ -21,6 +21,22 @@ For the alternate Ctrl+Shift+Space hotkey, add Alt for raw dictation. For F8, us
 
 **App theme** defaults to **System** and follows the Windows app color setting, including changes while Lazy Type is running. Choose **Light** or **Dark** to override it. **Popup theme** independently controls the floating dictation indicator: **Follow app** (default), **Light**, or **Dark**. Both choices are saved. Use **Preview** to see the popup for five seconds without opening the microphone or loading models.
 
+## Clean up and Reword
+
+With **Clean up speech** enabled, choose **Clean up** (the default) or **Reword** in the adjacent menu. Clean up makes minimal grammar and punctuation edits. Reword removes rambling and repeated ideas, reorganises the wording, and expresses the main point directly while retaining distinct details, conditions and intended meaning. The raw dictation shortcut bypasses either mode. The choice is saved and locked during processing.
+
+For an existing paragraph or transcript, type or paste into **Last result** and click **Clean up** or **Reword**. Both work independently of the AI suggestions toggle. Review the comparison, then choose **Apply clean up** / **Apply reword**, **Keep original**, or **Copy**. Manual edits only update Last result; they do not replace text in another app. The source remains under Original transcript. Editing Last result while a preview is open invalidates that preview. Escape cancels an active edit and releases the model; the microphone is never opened.
+
+Manual edits and Reword accept up to 6,000 characters. Incomplete or invalid edits keep the source text. Reword permits repeated numeric mentions to be combined but rejects lost or invented distinct numeric values and changed command flags or identifiers with underscores. These checks cannot establish semantic equivalence: review names, qualifications and quoted wording before applying. Numeric self-corrections that remove a distinct value may be rejected conservatively.
+
+To compare both editing modes with the same nine synthetic paragraph/transcription cases across all three installed models:
+
+```powershell
+dotnet run --project tests/LazyType.Tests -c Release -- --benchmark artifacts/verification/reword-benchmark.json
+```
+
+The benchmark uses the production prompts, model settings, parser and validation, warms each model, runs one worker at a time, and records outputs, load times and edit times locally. Expected ideas accompany each case for manual meaning review. It never records audio, opens the microphone or changes application preferences. Dynamic uses the same Qwen/Gemma workers and is not a separate quality candidate. See [benchmark findings](docs/reword-benchmark.md) for the measured comparison and limitations.
+
 ## Text model selection
 
 Choose one checkbox in **Text model**. The selection is saved, and existing settings default to **Qwen3 4B (current)**. Manual choices are **Qwen3 4B**, **Qwen3.5 9B**, and **Gemma 4 12B**. Only the selected model loads. Choices are locked while recording or editing; change them when idle or paused.

@@ -16,6 +16,7 @@ internal sealed class MainForm : Form
     // Setting rows controls
     public readonly ComboBox Mic = new();
     public readonly ModernCheckBox Clean = new();
+    public readonly ComboBox EditModeChoice = new();
     public readonly ModernCheckBox Suggestions = new();
     public readonly ModernCheckBox Startup = new();
     public readonly ModelSelector Models = new();
@@ -30,6 +31,8 @@ internal sealed class MainForm : Form
     public readonly TextBox Original = new();
     private readonly WandButton suggest = new();
     private readonly ModernButton copyBtn = new();
+    private readonly ModernButton cleanBtn = new();
+    private readonly ModernButton rewordBtn = new();
     private readonly System.Windows.Forms.Timer copyFeedbackTimer = new() { Interval = 1600 };
     private readonly BufferedPanel accordionHeader = new();
     private readonly Label accordionLabel = new();
@@ -52,6 +55,7 @@ internal sealed class MainForm : Form
     public event Action<int>? HotkeyPressed;
     public event Action? ImportRequested;
     public event Action? SuggestionRequested;
+    public event Action<string>? RewriteRequested;
     public event Action? PreviewPopupRequested;
     public bool Quitting;
 
@@ -118,6 +122,19 @@ internal sealed class MainForm : Form
         // Setting 2: Clean up speech
         var cleanRow = CreateSettingRow(g => VectorIcons.DrawCleanSpeech(g, new Rectangle(0, 0, 20, 20), GetIconColor()),
             "Clean up speech", null, Clean);
+        EditModeChoice.DropDownStyle = ComboBoxStyle.DropDownList;
+        EditModeChoice.Items.AddRange(new object[] { TextEditModes.Cleanup, TextEditModes.Reword });
+        EditModeChoice.SelectedIndex = 0;
+        EditModeChoice.Enabled = false;
+        EditModeChoice.AccessibleName = "Speech editing mode";
+        EditModeChoice.Width = 110;
+        EditModeChoice.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+        cleanRow.Controls.Add(EditModeChoice);
+        EditModeChoice.BringToFront();
+        cleanRow.Resize += (_, _) => EditModeChoice.SetBounds(cleanRow.Width - 154, 8, 110, 28);
+        tips.SetToolTip(EditModeChoice, "Clean up keeps your wording. Reword removes repetition and reorganises ideas while preserving meaning.");
+        Clean.AccessibleName = "Edit speech";
+        Clean.CheckedChanged += (_, _) => EditModeChoice.Enabled = Clean.Checked && !suggestionBusy;
 
         // Setting 3: AI suggestions
         var suggestionsRow = CreateSettingRow(g => PolishIcon.Draw(g, new Rectangle(0, 0, 20, 20), Color.FromArgb(127, 86, 217)),
@@ -167,6 +184,24 @@ internal sealed class MainForm : Form
             copyFeedbackTimer.Stop();
             copyBtn.Text = "Copy";
         };
+
+        cleanBtn.Text = TextEditModes.Cleanup;
+        rewordBtn.Text = TextEditModes.Reword;
+        foreach (var button in new[] { cleanBtn, rewordBtn })
+        {
+            button.Style = ModernButton.ButtonStyle.Secondary;
+            button.CornerRadius = 6;
+            button.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+            button.Click += (_, _) => RewriteRequested?.Invoke(button.Text);
+            resultHeader.Controls.Add(button);
+        }
+        resultHeader.Resize += (_, _) =>
+        {
+            cleanBtn.SetBounds(resultHeader.Width - 290, 0, 92, 28);
+            rewordBtn.SetBounds(resultHeader.Width - 192, 0, 92, 28);
+        };
+        tips.SetToolTip(rewordBtn, "Remove rambling and repetition, reorganise ideas, and review before applying.");
+        Result.AccessibleName = "Last result";
 
         resultHeader.Controls.Add(resultTitle);
         resultHeader.Controls.Add(copyBtn);
@@ -274,6 +309,7 @@ internal sealed class MainForm : Form
         Result.TextChanged += (_, _) => UpdateSuggestionButton();
 
         FormClosing += (_, e) => { if (!Quitting) { e.Cancel = true; Hide(); } };
+        UpdateSuggestionButton();
         Shown += (_, _) =>
         {
             var area = Screen.FromControl(this).WorkingArea;
@@ -307,9 +343,9 @@ internal sealed class MainForm : Form
         if (rightControl is ModernCheckBox cb)
         {
             cb.Text = string.Empty;
-            lblTitle.Click += (_, _) => cb.Checked = !cb.Checked;
-            iconBox.Click += (_, _) => cb.Checked = !cb.Checked;
-            row.Click += (_, _) => cb.Checked = !cb.Checked;
+            lblTitle.Click += (_, _) => { if (cb.Enabled) cb.Checked = !cb.Checked; };
+            iconBox.Click += (_, _) => { if (cb.Enabled) cb.Checked = !cb.Checked; };
+            row.Click += (_, _) => { if (cb.Enabled) cb.Checked = !cb.Checked; };
             cb.Location = new Point(row.Width - 28, (row.Height - 22) / 2);
             cb.Anchor = AnchorStyles.Top | AnchorStyles.Right;
             cb.Size = new Size(22, 22);
@@ -336,7 +372,7 @@ internal sealed class MainForm : Form
                 TextAlign = ContentAlignment.MiddleLeft,
                 Cursor = (rightControl is ModernCheckBox) ? Cursors.Hand : Cursors.Default
             };
-            if (rightControl is ModernCheckBox cb2) lblSub.Click += (_, _) => cb2.Checked = !cb2.Checked;
+            if (rightControl is ModernCheckBox cb2) lblSub.Click += (_, _) => { if (cb2.Enabled) cb2.Checked = !cb2.Checked; };
             row.Controls.Add(lblSub);
         }
         row.Controls.Add(rightControl);
@@ -482,6 +518,8 @@ internal sealed class MainForm : Form
         hideBtn.IsDark = dark;
         gearBtn.IsDark = dark;
         copyBtn.IsDark = dark;
+        cleanBtn.IsDark = dark;
+        rewordBtn.IsDark = dark;
 
         suggest.IsDark = dark;
 
@@ -510,7 +548,7 @@ internal sealed class MainForm : Form
             dotColor = Color.FromArgb(239, 68, 68); // Red
             pauseBtn.Text = "Pause dictation";
         }
-        else if (title.Contains("Clean") || title.Contains("Suggesting") || title.Contains("Transcrib"))
+        else if (title.Contains("Clean") || title.Contains("Reword") || title.Contains("Suggesting") || title.Contains("Transcrib"))
         {
             dotColor = Color.FromArgb(127, 86, 217); // Purple
             pauseBtn.Text = "Pause dictation";
@@ -534,6 +572,8 @@ internal sealed class MainForm : Form
     public void SetSuggestionBusy(bool busy)
     {
         suggestionBusy = busy;
+        Clean.Enabled = !busy;
+        EditModeChoice.Enabled = !busy && Clean.Checked;
         UpdateSuggestionButton();
     }
 
@@ -543,6 +583,7 @@ internal sealed class MainForm : Form
     public string SuggestParent => suggest.Parent?.Name ?? suggest.Parent?.GetType().Name ?? "null";
     public void UpdateSuggestionButton()
     {
+        cleanBtn.Enabled = rewordBtn.Enabled = !suggestionBusy && !string.IsNullOrWhiteSpace(Result.Text);
         suggest.Visible = Suggestions.Checked && !string.IsNullOrWhiteSpace(Result.Text);
         suggest.Enabled = !suggestionBusy;
         if (suggest.Visible)

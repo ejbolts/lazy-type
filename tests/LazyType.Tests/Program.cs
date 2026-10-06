@@ -30,7 +30,26 @@ internal static class Program
             }
             passed++; Console.WriteLine("PASS Mutually exclusive native checkbox controls");
         }
+        using (var form = new MainForm())
+        {
+            var buttons = Descendants(form).OfType<Button>().Where(b => b.Text is TextEditModes.Cleanup or TextEditModes.Reword).ToArray();
+            Check(buttons.Length == 2 && buttons.All(b => !b.Enabled), "Empty result disables both manual actions");
+            Check(!form.EditModeChoice.Enabled && form.EditModeChoice.Items.Cast<string>().SequenceEqual(new[] { TextEditModes.Cleanup, TextEditModes.Reword }));
+            form.Clean.Checked = true;
+            form.Result.Text = "Sample paragraph.";
+            Check(form.EditModeChoice.Enabled && buttons.All(b => b.Enabled), "Manual edits work without AI suggestions");
+            form.SetSuggestionBusy(true);
+            form.Result.Text = "Changed while busy.";
+            Check(!form.Clean.Enabled && !form.EditModeChoice.Enabled && buttons.All(b => !b.Enabled));
+            form.SetSuggestionBusy(false);
+            Check(form.Clean.Enabled && form.EditModeChoice.Enabled && buttons.All(b => b.Enabled));
+            form.Clean.Checked = false;
+            Check(!form.EditModeChoice.Enabled && buttons.All(b => b.Enabled), "Speech editing preference does not disable manual edits");
+            passed++; Console.WriteLine("PASS Native editing mode and empty/busy/manual action states");
+        }
         SynchronizationContext.SetSynchronizationContext(null);
+        if (args.Contains("--benchmark")) return await RewordBenchmark.Run(args);
+        if (args.Contains("--validate-benchmark")) return RewordBenchmark.Validate(args[Array.IndexOf(args, "--validate-benchmark") + 1]);
         if (args.Contains("--integration")) await Integration(args);
         else await Unit();
         Console.WriteLine($"RESULT {passed} passed, {failed} failed");
@@ -39,6 +58,38 @@ internal static class Program
     private static IEnumerable<Control> Descendants(Control c) => new[] { c }.Concat(c.Controls.Cast<Control>().SelectMany(Descendants));
     private static async Task Unit()
     {
+        await Test("Reword settings migrate and round-trip", () =>
+        {
+            Check(JsonSerializer.Deserialize<AppSettings>("{\"Cleanup\":false}")!.EditMode == TextEditModes.Cleanup);
+            Check(JsonSerializer.Deserialize<AppSettings>(JsonSerializer.Serialize(new AppSettings { EditMode = TextEditModes.Reword }))!.EditMode == TextEditModes.Reword);
+            Check(TextEditModes.Normalize("unknown") == TextEditModes.Cleanup);
+            return Task.CompletedTask;
+        });
+        await Test("Reword permits repetition removal and guards numeric details", () =>
+        {
+            var raw = string.Concat(Enumerable.Repeat("Please send the report at 3:30. ", 20));
+            Check(!EngineHost.PlausibleCleanup(raw, "Please send the report at 3:30."));
+            Check(EngineHost.PlausibleReword(raw, "Please send the report at 3:30."));
+            Check(EngineHost.PreservesRewordNumbers(raw, "Please send the report at 3:30."));
+            Check(!EngineHost.PreservesRewordNumbers("Send 3 items by 4:30.", "Send 3 items."));
+            Check(!EngineHost.PreservesRewordNumbers("Send 3 items.", "Send 3 items by 4:30."));
+            Check(!EngineHost.PreservesRewordNumbers("The value is -5.", "The value is 5."));
+            Check(!EngineHost.PlausibleReword(raw, "") && !EngineHost.PlausibleReword(raw, "<think>"));
+            Check(EngineHost.PreservesRewordLiterals("Run --dry-run for customer_id.", "For customer_id, run --dry-run."));
+            Check(!EngineHost.PreservesRewordLiterals("Run --dry-run for customer_id.", "Run a dry run for customer_id."));
+            Check(!EngineHost.PreservesRewordLiterals("Run --dry-run.", "Run --dry-runner."));
+            return Task.CompletedTask;
+        });
+        await Test("Empty and oversized reword input fails before loading workers", async () =>
+        {
+            using var host = new EngineHost();
+            foreach (var raw in new[] { " ", new string('x', 6001) })
+            {
+                try { await host.RewordAsync(raw, default); throw new Exception("Expected validation error"); }
+                catch (InvalidOperationException e) { Check(e.Message.Contains("6,000")); }
+                Check(host.TextWorkerCount == 0);
+            }
+        });
         await Test("Existing settings default to current; selection round-trip; unknown fallback", () =>
         {
             Check(JsonSerializer.Deserialize<AppSettings>("{}")!.TextModel == TextModels.Current);

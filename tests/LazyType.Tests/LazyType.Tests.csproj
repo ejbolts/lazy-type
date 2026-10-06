@@ -7,4 +7,5 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
   <ItemGroup><ProjectReference Include="../../src/LazyType/LazyType.csproj" /></ItemGroup>
+  <ItemGroup><None Include="reword-cases.json" CopyToOutputDirectory="PreserveNewest" /></ItemGroup>
 </Project>

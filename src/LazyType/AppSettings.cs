@@ -7,6 +7,7 @@ public sealed class AppSettings
 {
     public int Microphone { get; set; } = -1;
     public bool Cleanup { get; set; } = true;
+    public string EditMode { get; set; } = TextEditModes.Cleanup;
     public bool Suggestions { get; set; }
     public string TextModel { get; set; } = TextModels.Current;
     public string Hotkey { get; set; } = "Ctrl+Alt+Space";

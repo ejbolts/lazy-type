@@ -65,6 +65,7 @@ The marks and bar never take focus, so you can keep typing. Labels sit on whiche
 
 - Marks and replacement need Windows to expose the field's text and a unique range for the dictation. Editing the dictated text yourself, duplicate text, or editors that report the pasted text differently disable them; **Copy** still works. The reason (never the dictated text) is written to the log.
 - Only the dictated range is replaced; surrounding text is preserved. Nothing is replaced until you click a label or **Apply suggestion**.
+- Suggestion labels and the automatic pop-up keep the editor focused when clicked, including Notion blocks that Windows reports as focused but not focusable. If replacement fails, the pop-up explains the failure, clears the marks, and keeps **Copy** available.
 - Marks follow scrolling and window moves, are hidden wherever another window covers the field, and clear once the field is edited or the bar is closed. If an editor cannot locate every change, the pop-up shows the comparison instead.
 - After a dictation, the text model stays loaded from cleanup for the check and is released straight afterward; from the **Last result** wand it loads only when clicked. The microphone is never opened. Escape, closing the bar, disabling suggestions, pausing or quitting cancels a check and releases the model.
 - Suggestions support results up to 6,000 characters. Failed or incomplete edits leave your text unchanged.

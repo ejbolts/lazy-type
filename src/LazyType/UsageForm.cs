@@ -31,7 +31,6 @@ internal sealed class UsageForm : Form
         public readonly ShareBar Bar = new();
     }
 
-    private static readonly string[] Models = { ModelUsage.LegacyQwenModel, TextModels.Qwen35, TextModels.Gemma };
     private readonly Label title = new(), summary = new(), note = new();
     private readonly Dictionary<string, Row> rows = new();
     private readonly ModernButton close = new();
@@ -46,7 +45,7 @@ internal sealed class UsageForm : Form
         MaximizeBox = MinimizeBox = false;
         ShowInTaskbar = false;
         StartPosition = FormStartPosition.Manual;
-        ClientSize = new Size(440, 456);
+        ClientSize = new Size(440, 378);
         Padding = new Padding(22, 18, 22, 16);
         KeyPreview = true;
         KeyDown += (_, e) => { if (e.KeyCode == Keys.Escape) Close(); };
@@ -58,12 +57,12 @@ internal sealed class UsageForm : Form
         summary.Dock = DockStyle.Top; summary.Height = 34; summary.AutoEllipsis = true;
 
         var list = new Panel { Dock = DockStyle.Fill, Padding = new Padding(0, 6, 0, 0) };
-        foreach (var model in Models.Reverse())
+        foreach (var model in TextModels.Choices.Reverse())
         {
             var row = new Row();
             var panel = new Panel { Dock = DockStyle.Top, Height = 78, Padding = new Padding(0, 4, 0, 8) };
             var head = new Panel { Dock = DockStyle.Top, Height = 24 };
-            row.Name.Text = model == ModelUsage.LegacyQwenModel ? model + " (previous)" : model; row.Name.Font = new Font("Segoe UI", 10f, FontStyle.Bold);
+            row.Name.Text = model; row.Name.Font = new Font("Segoe UI", 10f, FontStyle.Bold);
             row.Name.Dock = DockStyle.Fill; row.Name.TextAlign = ContentAlignment.MiddleLeft;
             row.Count.Dock = DockStyle.Right; row.Count.Width = 200; row.Count.TextAlign = ContentAlignment.MiddleRight;
             head.Controls.Add(row.Name); head.Controls.Add(row.Count);
@@ -93,11 +92,13 @@ internal sealed class UsageForm : Form
 
     public void ShowStats(ModelUsage usage)
     {
-        var total = usage.Dictations;
+        // Counts saved for retired models stay in usage.json but are neither listed nor totalled.
+        var shown = rows.Keys.Select(usage.For).ToArray();
+        var total = shown.Sum(e => e.Dictations);
         var since = usage.Since.ToLocalTime().ToString("d MMM yyyy");
         summary.Text = total == 0
             ? $"No edited dictations yet · counting since {since}"
-            : $"{Plural(total, "edited dictation")} · {Plural(usage.Words, "word")} spoken · since {since}";
+            : $"{Plural(total, "edited dictation")} · {Plural(shown.Sum(e => e.Words), "word")} spoken · since {since}";
         foreach (var (model, row) in rows)
         {
             var entry = usage.For(model);
@@ -105,7 +106,7 @@ internal sealed class UsageForm : Form
             row.Count.Text = entry.Dictations == 0 ? "Not used" : $"{entry.Dictations:N0} · {share:P0}";
             row.Bar.Share = share;
             row.Detail.Text = entry.Dictations == 0
-                ? model == ModelUsage.LegacyQwenModel ? "Historical model; no longer selectable" : model == TextModels.Gemma ? "Used for Reword or when selected" : "Used when selected for Clean up / Polish"
+                ? model == TextModels.Gemma ? "Used for Reword or when selected" : "Used when selected for Clean up / Polish"
                 : $"{Plural(entry.Words, "word")} · {entry.Words / (double)entry.Dictations:N0} per dictation · {entry.Dynamic:N0} historical Dynamic · {entry.Manual:N0} direct";
             row.Count.ForeColor = entry.Dictations == 0 ? MutedColor : ForeColor;
         }

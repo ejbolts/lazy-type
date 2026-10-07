@@ -19,9 +19,6 @@ ASSETS = [
     ('models/whisper-turbo-q5.bin',
      'https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-large-v3-turbo-q5_0.bin',
      '394221709cd5ad1f40c46e6031ca61bce88931e6e088c188294c6d5a55ffa7e2', None),
-    ('models/qwen3-4b-q4.gguf',
-     'https://huggingface.co/unsloth/Qwen3-4B-Instruct-2507-GGUF/resolve/a06e946bb6b655725eafa393f4a9745d460374c9/Qwen3-4B-Instruct-2507-Q4_K_M.gguf',
-     '3605803b982cb64aead44f6c1b2ae36e3acdb41d8e46c8a94c6533bc4c67e597', None),
     ('downloads/whisper-b5130-cuda12.zip',
      'https://github.com/ggml-org/whisper.cpp/releases/download/b5130/whisper-cublas-12.4.0-bin-x64.zip',
      'af520ddd034d985b55dfeea3e465ed93653ba2aee1a55e865033edc548c272a7', 'engines/whisper'),
@@ -41,10 +38,9 @@ TEXT_ASSETS = {
         '0a270ec9fe6b34f4a0d33992b6135117b484ebc4766ab76b51d4ae8c457e4c42', None),
 }
 
-def assets_for(choice):
-    optional = {'current': [], 'qwen35': ['qwen35'], 'gemma': ['gemma'],
-                'dynamic': ['gemma'], 'all': ['qwen35', 'gemma']}[choice]
-    return ASSETS + [TEXT_ASSETS[name] for name in optional]
+def assets_for(choice='all'):
+    selected = {'qwen35': ['qwen35'], 'gemma': ['gemma'], 'all': ['qwen35', 'gemma']}[choice]
+    return ASSETS + [TEXT_ASSETS[name] for name in selected]
 
 def digest(path):
     h = hashlib.sha256()
@@ -80,7 +76,7 @@ def download(asset):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--text-model', choices=['current', 'qwen35', 'gemma', 'dynamic', 'all'], default='current')
+    parser.add_argument('--text-model', choices=['qwen35', 'gemma', 'all'], default='all')
     parser.add_argument('--list', action='store_true', help='List selected pinned assets without downloading')
     options = parser.parse_args()
     assets = assets_for(options.text_model)

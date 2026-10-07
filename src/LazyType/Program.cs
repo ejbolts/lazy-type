@@ -65,7 +65,7 @@ internal static class Program
             }
 
             var sampleUsage = new ModelUsage { Since = new DateTimeOffset(2026, 10, 7, 9, 0, 0, TimeSpan.Zero) };
-            for (var i = 0; i < 18; i++) sampleUsage.Record(TextModels.Current, i % 3 != 0, "a short note to send");
+            for (var i = 0; i < 18; i++) sampleUsage.Record(ModelUsage.LegacyQwenModel, i % 3 != 0, "a short note to send");
             for (var i = 0; i < 7; i++) sampleUsage.Record(TextModels.Gemma, true, string.Join(' ', Enumerable.Repeat("longer", 64)));
             foreach (var (name, stats, dark) in new[] { ("usage_form_light", sampleUsage, false), ("usage_form_dark", sampleUsage, true), ("usage_form_empty", new ModelUsage(), false) })
             {
@@ -207,7 +207,7 @@ internal static class SelfTest
             var edits = new List<object>();
             foreach (var sample in samples)
             {
-                timer.Restart(); var (clean, _) = await engines.CleanupAsync(sample, timeout.Token);
+                timer.Restart(); var clean = await engines.CleanupAsync(sample, timeout.Token);
                 edits.Add(new { input = sample, output = clean, seconds = timer.Elapsed.TotalSeconds });
                 if (sample.Contains("photosynthesis") && clean.Length > 100) throw new Exception("Cleanup answered a dictated question.");
                 if (sample.Contains("Thursday") && !clean.Contains("Thursday")) throw new Exception("Cleanup lost a correction.");

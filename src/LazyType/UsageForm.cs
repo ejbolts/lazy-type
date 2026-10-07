@@ -31,7 +31,7 @@ internal sealed class UsageForm : Form
         public readonly ShareBar Bar = new();
     }
 
-    private static readonly string[] Models = { TextModels.Current, TextModels.Qwen35, TextModels.Gemma };
+    private static readonly string[] Models = { ModelUsage.LegacyQwenModel, TextModels.Qwen35, TextModels.Gemma };
     private readonly Label title = new(), summary = new(), note = new();
     private readonly Dictionary<string, Row> rows = new();
     private readonly ModernButton close = new();
@@ -63,7 +63,7 @@ internal sealed class UsageForm : Form
             var row = new Row();
             var panel = new Panel { Dock = DockStyle.Top, Height = 78, Padding = new Padding(0, 4, 0, 8) };
             var head = new Panel { Dock = DockStyle.Top, Height = 24 };
-            row.Name.Text = model; row.Name.Font = new Font("Segoe UI", 10f, FontStyle.Bold);
+            row.Name.Text = model == ModelUsage.LegacyQwenModel ? model + " (previous)" : model; row.Name.Font = new Font("Segoe UI", 10f, FontStyle.Bold);
             row.Name.Dock = DockStyle.Fill; row.Name.TextAlign = ContentAlignment.MiddleLeft;
             row.Count.Dock = DockStyle.Right; row.Count.Width = 200; row.Count.TextAlign = ContentAlignment.MiddleRight;
             head.Controls.Add(row.Name); head.Controls.Add(row.Count);
@@ -77,7 +77,7 @@ internal sealed class UsageForm : Form
             list.Controls.Add(panel);
         }
 
-        note.Text = "Each cleaned dictation counts once, for the model that edited it. Raw dictations and wording checks aren't counted. Only counts are saved, never your words.";
+        note.Text = "Each edited dictation counts once, for the model that edited it. Raw dictations and wording checks aren't counted. Only counts are saved, never your words.";
         note.Font = new Font("Segoe UI", 8.5f);
         note.Dock = DockStyle.Bottom; note.Height = 48;
 
@@ -96,8 +96,8 @@ internal sealed class UsageForm : Form
         var total = usage.Dictations;
         var since = usage.Since.ToLocalTime().ToString("d MMM yyyy");
         summary.Text = total == 0
-            ? $"No cleaned dictations yet · counting since {since}"
-            : $"{Plural(total, "cleaned dictation")} · {Plural(usage.Words, "word")} spoken · since {since}";
+            ? $"No edited dictations yet · counting since {since}"
+            : $"{Plural(total, "edited dictation")} · {Plural(usage.Words, "word")} spoken · since {since}";
         foreach (var (model, row) in rows)
         {
             var entry = usage.For(model);
@@ -105,8 +105,8 @@ internal sealed class UsageForm : Form
             row.Count.Text = entry.Dictations == 0 ? "Not used" : $"{entry.Dictations:N0} · {share:P0}";
             row.Bar.Share = share;
             row.Detail.Text = entry.Dictations == 0
-                ? model == TextModels.Gemma ? "Used manually, or by Dynamic after the handover" : "Used manually" + (model == TextModels.Current ? ", or by Dynamic before the handover" : "")
-                : $"{Plural(entry.Words, "word")} · {entry.Words / (double)entry.Dictations:N0} per dictation · {entry.Dynamic:N0} Dynamic · {entry.Manual:N0} manual";
+                ? model == ModelUsage.LegacyQwenModel ? "Historical model; no longer selectable" : model == TextModels.Gemma ? "Used for Reword or when selected" : "Used when selected for Clean up / Polish"
+                : $"{Plural(entry.Words, "word")} · {entry.Words / (double)entry.Dictations:N0} per dictation · {entry.Dynamic:N0} historical Dynamic · {entry.Manual:N0} direct";
             row.Count.ForeColor = entry.Dictations == 0 ? MutedColor : ForeColor;
         }
     }

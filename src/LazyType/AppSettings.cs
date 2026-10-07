@@ -7,8 +7,10 @@ public sealed class AppSettings
 {
     public int Microphone { get; set; } = -1;
     public bool Cleanup { get; set; } = true;
+    public string EditMode { get; set; } = TextEditModes.Cleanup;
     public bool Suggestions { get; set; }
-    public string TextModel { get; set; } = TextModels.Current;
+    private string textModel = TextModels.Qwen35;
+    public string TextModel { get => textModel; set => textModel = TextModels.Normalize(value); }
     public string Hotkey { get; set; } = "Ctrl+Alt+Space";
     public string Theme { get; set; } = "System";
     public string PopupTheme { get; set; } = "Follow app";

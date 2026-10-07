@@ -7,7 +7,7 @@ internal sealed class ModelSelector : UserControl
     private readonly Label detail = new() { Dock = DockStyle.Bottom, Height = 22, AutoEllipsis = true };
     private readonly ModernButton usage = new();
     private bool updating, locked, dark;
-    private string selected = TextModels.Current;
+    private string selected = TextModels.Qwen35;
     public event Action? SelectionChanged;
     public event Action? UsageRequested;
     public string SelectedModel
@@ -41,10 +41,10 @@ internal sealed class ModelSelector : UserControl
     }
     public ModelSelector()
     {
-        Height = 114;
+        Height = 84;
         detail.Font = new Font("Segoe UI", 8.5f);
         var header = new Panel { Dock = DockStyle.Top, Height = 30, Padding = new Padding(0, 0, 0, 4) };
-        var title = new Label { Text = "Text model", Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft, Font = new Font("Segoe UI", 10f, FontStyle.Bold) };
+        var title = new Label { Text = "Clean up / Polish model", Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft, Font = new Font("Segoe UI", 10f, FontStyle.Bold) };
         // Opens Model usage from the main window; usage stays available while the choice is locked.
         usage.Text = "Usage"; usage.AccessibleName = "Model usage";
         usage.Style = ModernButton.ButtonStyle.Secondary; usage.CornerRadius = 6;
@@ -53,16 +53,15 @@ internal sealed class ModelSelector : UserControl
         usage.IconDrawAction = (g, rect, col) => VectorIcons.DrawUsage(g, rect, col);
         usage.Click += (_, _) => UsageRequested?.Invoke();
         header.Controls.Add(title); header.Controls.Add(usage);
-        var choices = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 2, Margin = Padding.Empty };
+        var choices = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1, Margin = Padding.Empty };
         choices.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
         choices.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
-        choices.RowStyles.Add(new RowStyle(SizeType.Percent, 50));
-        choices.RowStyles.Add(new RowStyle(SizeType.Percent, 50));
+        choices.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         for (var i = 0; i < TextModels.Choices.Length; i++)
         {
             var model = TextModels.Choices[i];
             var box = new ModernCheckBox { Dock = DockStyle.Left, Width = 28, AccessibleName = model, Checked = model == selected };
-            var label = new Label { Text = model == TextModels.Current ? model + " (current)" : model,
+            var label = new Label { Text = model,
                 Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft, Cursor = Cursors.Hand };
             var row = new Panel { Dock = DockStyle.Fill, Margin = Padding.Empty };
             row.Controls.Add(label); row.Controls.Add(box);
@@ -75,7 +74,7 @@ internal sealed class ModelSelector : UserControl
         SetStatus("Models unloaded");
     }
     public void SetStatus(string status) => detail.Text = status == "Models unloaded"
-        ? selected == TextModels.Dynamic ? "Qwen first; load Gemma 5s after Qwen is ready." : "Loads when you start dictating."
+        ? "Loads when you start dictating."
         : status;
     public void ApplyTheme(bool dark)
     {

@@ -21,27 +21,39 @@ For the alternate Ctrl+Shift+Space hotkey, add Alt for raw dictation. For F8, us
 
 **App theme** defaults to **System** and follows the Windows app color setting, including changes while Lazy Type is running. Choose **Light** or **Dark** to override it. **Popup theme** independently controls the floating dictation indicator: **Follow app** (default), **Light**, or **Dark**. Both choices are saved. Use **Preview** to see the popup for five seconds without opening the microphone or loading models.
 
+## Clean up and Reword
+
+**Clean up speech** makes minimal grammar and punctuation edits using the selected Clean up / Polish model. Turn on the separate **Reword speech** toggle for a stronger rewrite using **Gemma 4 12B**, regardless of the selected model. Reword removes rambling and repeated ideas, reorganises the wording, and expresses the main point directly while retaining distinct details, conditions and intended meaning. Reword takes priority when both toggles are on and works even if Clean up speech is off. Turn it off to return to your cleanup preference. The raw dictation shortcut bypasses both. Reword is off by default; the preference is saved and locked during recording or processing. Existing saved Reword mode selections enable the new toggle.
+
+For an existing paragraph or transcript, type or paste into **Last result** and click **Clean up** or **Reword**. Both work independently of the speech editing and AI suggestions toggles. The Reword button always uses Gemma 4; Clean up and the Polish wand use the selected model. Review the comparison, then choose **Apply clean up** / **Apply reword**, **Keep original**, or **Copy**. Manual edits only update Last result; they do not replace text in another app. The source remains under Original transcript. Editing Last result while a preview is open invalidates that preview. Escape cancels an active edit and releases the model; the microphone is never opened.
+
+Manual edits and Reword accept up to 6,000 characters. Incomplete or invalid edits keep the source text. Reword permits repeated numeric mentions to be combined but rejects lost or invented distinct numeric values and changed command flags or identifiers with underscores. These checks cannot establish semantic equivalence: review names, qualifications and quoted wording before applying. Numeric self-corrections that remove a distinct value may be rejected conservatively.
+
+To compare both editing modes with the same nine synthetic paragraph/transcription cases across both supported models:
+
+```powershell
+dotnet run --project tests/LazyType.Tests -c Release -- --benchmark artifacts/verification/reword-benchmark.json
+```
+
+The benchmark uses the production prompts, model settings, parser and validation, warms each model, runs one worker at a time, and records outputs, load times and edit times locally. Expected ideas accompany each case for manual meaning review. It never records audio, opens the microphone or changes application preferences. See [benchmark findings](docs/reword-benchmark.md) for the measured comparison and limitations.
+
 ## Text model selection
 
-Choose one checkbox in **Text model**. The selection is saved, and existing settings default to **Qwen3 4B (current)**. Manual choices are **Qwen3 4B**, **Qwen3.5 9B**, and **Gemma 4 12B**. Only the selected model loads. Choices are locked while recording or editing; change them when idle or paused.
+Choose **Qwen3.5 9B** or **Gemma 4 12B** in **Clean up / Polish model**. Qwen3.5 is the default for these edits. Reword always uses Gemma 4, including the manual Reword button. The selection is saved; older Qwen3 4B, Dynamic, and unknown selections migrate to Qwen3.5. Only the model required for the current edit loads; a later Polish check restores the selected model, releasing Gemma before loading another model. Choices are locked while recording or editing; change them when idle or paused. Escape, Pause, Quit, and normal completion release the worker.
 
-**Dynamic** loads the current Qwen first. Five seconds after Qwen passes its readiness check, Gemma starts loading in the background. Qwen remains available during loading. Once Gemma passes its readiness check, new edits use Gemma; edits already running on Qwen finish on Qwen before it unloads. A failed or missing Gemma load leaves Qwen available and shows **Gemma unavailable**. There is no automatic retry loop during that recording. If a short dictation finishes before the handover, it uses Qwen and cancels the pending upgrade. Escape, Pause, Quit, and normal completion release both workers, including a partially loaded Gemma.
-
-The overlap needs memory for Whisper, Qwen, and Gemma together, in addition to other applications. This flow is tested on an RTX 4080 with 16 GB VRAM. Select a manual model if your GPU cannot accommodate the overlap. Dynamic does not re-edit an already completed result.
-
-The additional models are optional. Install all choices with:
+Install both choices with:
 
 ```powershell
 python scripts/setup_models.py --text-model all
 ```
 
-Use `--text-model qwen35`, `gemma`, or `dynamic` to install only the corresponding additional weights, or pass `-TextModel all` to `scripts/install.ps1`. Defaults still download the current model only. Pinned Q4_K_M files are approximately 5.68 GB for Qwen3.5 and 7.12 GB for Gemma. Existing benchmark downloads under `benchmarks/*/models` are reused without copying them. Selecting a model does not download it; a missing manual model is reported when used. All text models run with thinking disabled for bounded editing responses.
+The setup and installer default to both models so Reword is ready alongside Qwen3.5 cleanup. Use `--text-model gemma` to install only Gemma or `--text-model qwen35` for only Qwen3.5 (Reword then needs Gemma installed separately), or pass `-TextModel all` to `scripts/install.ps1`. Pinned Q4_K_M files are approximately 5.68 GB for Qwen3.5 and 7.12 GB for Gemma. Existing benchmark downloads under `benchmarks/*/models` are reused without copying them. Selecting a model does not download it; a missing model is reported when used. Previously downloaded models remain on disk. Both models run with thinking disabled for bounded editing responses.
 
 ## Model usage
 
-Click **Usage** beside **Text model** in the main window (or choose **Model usage** from the gear or tray menu) to see how often each text model has cleaned your dictation. Each cleaned dictation counts once, for the model that actually edited it: in **Dynamic**, that is Qwen before the handover and Gemma after it. Manual selections count the same way. Each model shows its share of all dictations, the words you spoke to it, the average words per dictation, and how many came from Dynamic or a manual choice.
+Click **Usage** beside **Clean up / Polish model** in the main window (or choose **Model usage** from the gear or tray menu) to see how often each text model edited a dictation. Each successful cleanup or speech Reword counts once, for the worker that actually edited it. Reword counts towards Gemma even when Qwen is selected for cleanup. Each model shows its share of all dictations, spoken words and average words per dictation. Historical Qwen3 4B and Dynamic counts remain visible and saved; those models/modes are no longer selectable. New counts appear as direct edits.
 
-Raw dictations, failed cleanups and wording checks are not counted. Counts update live while the window is open. Counts are saved after every dictation in `usage.json` (in the app folder above), so they carry over when the app restarts or updates. Only counts are saved; your words are never stored. An unreadable file is kept as `usage.json.unreadable` rather than overwritten. Isolated test sessions keep their counts in memory only.
+Raw dictations, failed edits, manual Last result edits and wording checks are not counted. Counts update live while the window is open. Counts are saved after every dictation in `usage.json` (in the app folder above), so they carry over when the app restarts or updates. Only counts are saved; your words are never stored. An unreadable file is kept as `usage.json.unreadable` rather than overwritten. Isolated test sessions keep their counts in memory only.
 
 ## AI suggestions
 
@@ -59,7 +71,7 @@ Turn on **AI suggestions · check wording after dictation** in the main window. 
 
 The marks and bar never take focus, so you can keep typing. Labels sit on whichever side covers less of your other text. The wand beside **Last result** in Lazy Type runs the same check on demand and shows the comparison in the pop-up.
 
-**How this differs from cleanup.** Both use the selected local text model with different instructions. Cleanup is automatic and minimal: it corrects grammar, punctuation and capitalisation, removes fillers, false starts and pause dashes, resolves self-corrections, and otherwise keeps your wording. Suggestions may reword awkward phrasing and improve flow, so they are only applied when you choose. Both keep facts, names, numbers and dates, and never answer questions or follow instructions in the dictation. A suggestion that changes too much or alters a number is discarded.
+**How this differs from cleanup.** Cleanup and suggestions use the selected local text model with different instructions; Reword uses Gemma 4. Cleanup is automatic and minimal: it corrects grammar, punctuation and capitalisation, removes fillers, false starts and pause dashes, resolves self-corrections, and otherwise keeps your wording. Suggestions may reword awkward phrasing and improve flow, so they are only applied when you choose. Both keep facts, names, numbers and dates, and never answer questions or follow instructions in the dictation. A suggestion that changes too much or alters a number is discarded.
 
 **Limits and safety.**
 
@@ -72,7 +84,7 @@ The marks and bar never take focus, so you can keep typing. Labels sit on whiche
 ## Models and privacy
 
 - Whisper Large V3 Turbo Q5_0, approximately 574 MB model file.
-- Qwen3-4B-Instruct-2507 Q4_K_M, approximately 2.5 GB model file.
+- Qwen3.5 9B Q4_K_M (default), approximately 5.68 GB model file; Gemma 4 12B Q4_K_M, approximately 7.12 GB.
 - Silero VAD filters silence before transcription.
 - Native CUDA engines use the NVIDIA GPU. Each text worker has a 4,096-token context and a single processing slot to bound memory use.
 - No cloud transcription or cleanup; the only inference connections are loopback connections on this PC. The text server uses a per-session authentication key.
@@ -107,13 +119,13 @@ dotnet run --project tests/LazyType.Tests -c Release
 python -m unittest discover -s tests -p "test_*.py"
 ```
 
-To exercise all installed text models with real speech inference, the five-second handover, an edit in flight, and cancellation (no microphone or insertion):
+To exercise both supported text models with real speech inference, cleanup, polish, Reword, unloading, and cancellation (no microphone or insertion):
 
 ```powershell
 dotnet run --project tests/LazyType.Tests -c Release -- --integration --audio path/to/public-16k-mono.wav
 ```
 
-These optional integration checks need all three models and a compatible GPU. Use synthetic or public audio. The tests keep model files on disk.
+These optional integration checks need both text models and a compatible GPU. Use synthetic or public audio. The tests keep model files on disk.
 
 To repeat the memory measurement with the installed models and NVIDIA driver (wait until dictation is idle first):
 
@@ -121,7 +133,7 @@ To repeat the memory measurement with the installed models and NVIDIA driver (wa
 ./src/LazyType/bin/Release/net8.0-windows/LazyType.exe --memory-test artifacts/verification/memory-test.json
 ```
 
-This explicit diagnostic loads both models, exercises speech detection and cleanup with synthetic input, records RAM and whole-device GPU readings, then unloads both workers. It never opens the microphone. The UI tooltip is a dated reference sample; rerunning the diagnostic writes a JSON report without changing that reference.
+This explicit diagnostic loads both models, exercises speech detection and cleanup with synthetic input, records RAM and whole-device GPU readings, then unloads both workers. It never opens the microphone. The diagnostic uses Qwen3.5 for text editing and writes a local JSON report.
 
 `Test WAV…` runs a local WAV through transcription and cleanup without inserting into another app. It accepts recordings up to two minutes and converts their audio format as needed.
 

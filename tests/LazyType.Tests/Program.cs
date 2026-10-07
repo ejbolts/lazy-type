@@ -67,6 +67,19 @@ internal static class Program
             Check(labels.All(l => l.ForeColor == form.ForeColor) && boxes.All(b => b.Enabled), "Unlocked labels inherit the theme colour");
             passed++; Console.WriteLine("PASS Locked model choice stays readable");
         }
+        using (var usageForm = new UsageForm(false))
+        {
+            var usage = JsonSerializer.Deserialize<ModelUsage>("{\"Models\":{\"Qwen3 4B\":{\"Dynamic\":20,\"Words\":317},\"Gemma 4 12B\":{\"Dynamic\":9,\"Words\":452}}}")!;
+            usage.Record(TextModels.Qwen35, false, "send it now");
+            usageForm.ShowStats(usage);
+            var texts = usageForm.Controls.Cast<Control>().SelectMany(Descendants).OfType<Label>().Select(l => l.Text).ToArray();
+            Check(!texts.Any(t => t.Contains("Qwen3 4B") || t.Contains("previous") || t.Contains("Historical model")), "Retired model is not listed");
+            Check(TextModels.Choices.All(texts.Contains), "Both current models are listed");
+            Check(texts.Any(t => t.StartsWith("10 edited dictations · 455 words spoken")), "Totals cover listed models only");
+            Check(texts.Contains("9 · 90%") && texts.Contains("1 · 10%"), "Shares add up across listed models");
+            Check(JsonSerializer.Deserialize<ModelUsage>(JsonSerializer.Serialize(usage))!.For("Qwen3 4B").Dynamic == 20, "Retired counts stay saved");
+            passed++; Console.WriteLine("PASS Usage window lists only current models");
+        }
         using (var preview = new SuggestionForm("Graph icon", true, true))
         {
             preview.ShowSuggestion("The graph icon", TextDiff.Compare("Graph icon", "The graph icon"), true, inline: true);
@@ -220,10 +233,10 @@ internal static class Program
         {
             var usage = new ModelUsage();
             Check(usage.Dictations == 0 && usage.For(TextModels.Gemma).Dictations == 0);
-            usage.Record(ModelUsage.LegacyQwenModel, true, "Um, send the report at 3:30, okay?");
+            usage.Record(TextModels.Qwen35, true, "Um, send the report at 3:30, okay?");
             usage.Record(TextModels.Gemma, true, "It's state-of-the-art work.");
-            usage.Record(ModelUsage.LegacyQwenModel, false, "");
-            Check(usage.For(ModelUsage.LegacyQwenModel) is { Dynamic: 1, Manual: 1, Dictations: 2, Words: 7 }, "Qwen counts");
+            usage.Record(TextModels.Qwen35, false, "");
+            Check(usage.For(TextModels.Qwen35) is { Dynamic: 1, Manual: 1, Dictations: 2, Words: 7 }, "Qwen counts");
             Check(usage.For(TextModels.Gemma) is { Dynamic: 1, Manual: 0, Words: 3 } && usage.Dictations == 3 && usage.Words == 10, "Gemma counts");
             var json = JsonSerializer.Serialize(usage);
             Check(!json.Contains("Dictations") && !json.Contains("report"), "Only counts are stored");
@@ -239,7 +252,7 @@ internal static class Program
                 var file = Path.Combine(folder, "usage.json");
                 Check(ModelUsage.Load(file).Dictations == 0, "Missing file starts empty");
                 var first = ModelUsage.Load(file); first.Record(TextModels.Gemma, true, "one two three"); first.Save(file);
-                var second = ModelUsage.Load(file); second.Record(ModelUsage.LegacyQwenModel, false, "four"); second.Save(file);
+                var second = ModelUsage.Load(file); second.Record(TextModels.Qwen35, false, "four"); second.Save(file);
                 var third = ModelUsage.Load(file);
                 Check(third.Dictations == 2 && third.Words == 4 && third.Since == first.Since && !File.Exists(file + ".tmp"), "Counts accumulate across loads");
                 File.WriteAllText(file, "{ not json");

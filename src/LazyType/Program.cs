@@ -65,7 +65,7 @@ internal static class Program
             }
 
             var sampleUsage = new ModelUsage { Since = new DateTimeOffset(2026, 10, 7, 9, 0, 0, TimeSpan.Zero) };
-            for (var i = 0; i < 18; i++) sampleUsage.Record(ModelUsage.LegacyQwenModel, i % 3 != 0, "a short note to send");
+            for (var i = 0; i < 18; i++) sampleUsage.Record(TextModels.Qwen35, i % 3 != 0, "a short note to send");
             for (var i = 0; i < 7; i++) sampleUsage.Record(TextModels.Gemma, true, string.Join(' ', Enumerable.Repeat("longer", 64)));
             foreach (var (name, stats, dark) in new[] { ("usage_form_light", sampleUsage, false), ("usage_form_dark", sampleUsage, true), ("usage_form_empty", new ModelUsage(), false) })
             {

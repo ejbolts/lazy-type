@@ -9,11 +9,12 @@ setup = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(setup)
 
 class ModelSetupTests(unittest.TestCase):
-    def test_default_assets_unchanged(self):
-        self.assertEqual(setup.assets_for('current'), setup.ASSETS)
+    def test_default_assets_support_cleanup_and_gemma_reword(self):
+        self.assertEqual(setup.assets_for(), setup.ASSETS + [setup.TEXT_ASSETS['qwen35'], setup.TEXT_ASSETS['gemma']])
+        self.assertFalse(any('qwen3-4b' in asset[0] for asset in setup.assets_for()))
 
     def test_selection_downloads_only_requested_optional_weights(self):
-        for selection, extras in [('qwen35', ['qwen35']), ('gemma', ['gemma']), ('dynamic', ['gemma']), ('all', ['qwen35', 'gemma'])]:
+        for selection, extras in [('qwen35', ['qwen35']), ('gemma', ['gemma']), ('all', ['qwen35', 'gemma'])]:
             with self.subTest(selection=selection):
                 assets = setup.assets_for(selection)
                 self.assertEqual(assets[len(setup.ASSETS):], [setup.TEXT_ASSETS[e] for e in extras])

@@ -20,6 +20,7 @@ internal sealed class SuggestionForm : Form
     private IReadOnlyList<DiffPart>? changes;
     // Compact: the edits are drawn in the field itself, so only the actions are shown unless expanded.
     private bool compact, expanded;
+    private readonly string applyLabel;
     public event Action? ApplyRequested;
     // Shown without taking focus, for suggestions that appear on their own while the user may be typing.
     public bool Passive { get; set; }
@@ -40,8 +41,9 @@ internal sealed class SuggestionForm : Form
     }
     public string SuggestedText => suggestedText;
 
-    public SuggestionForm(string original, bool external, bool isDark = false)
+    public SuggestionForm(string original, bool external, bool isDark = false, string? editMode = null)
     {
+        applyLabel = editMode == null ? "Apply suggestion" : "Apply " + editMode.ToLowerInvariant();
         this.isDark = isDark;
         Text = "Lazy Type · Wording suggestion";
         FormBorderStyle = FormBorderStyle.None;
@@ -72,7 +74,8 @@ internal sealed class SuggestionForm : Form
             }
         };
 
-        title.Text = "A little polish";
+        title.Text = editMode == null ? "A little polish" : editMode + " preview";
+        Text = title.Text;
         title.Font = new Font("Segoe UI", 11.5f, FontStyle.Bold);
         title.AutoSize = false;
         title.SetBounds(28, 4, 220, 24);
@@ -139,7 +142,7 @@ internal sealed class SuggestionForm : Form
         // Action row
         var actionPanel = new Panel { Dock = DockStyle.Bottom, Height = 44, Padding = new Padding(0, 6, 0, 0) };
 
-        apply.Text = "Apply suggestion";
+        apply.Text = applyLabel;
         apply.Style = ModernButton.ButtonStyle.Primary;
         apply.SetBounds(0, 6, 154, 34);
         apply.Click += (_, _) => ApplyRequested?.Invoke();
@@ -228,7 +231,7 @@ internal sealed class SuggestionForm : Form
         details.Text = "Show wording";
         details.Visible = inline && changed;
         apply.Enabled = canApply && changed;
-        apply.Text = changed ? "Apply suggestion" : "Already optimal";
+        apply.Text = changed ? applyLabel : "Already optimal";
         RenderChanges();
         UpdateLayout();
     }

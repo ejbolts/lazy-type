@@ -8,6 +8,7 @@ namespace LazyType;
 // totals only; dictated text is never stored.
 public sealed class ModelUsage
 {
+    public const string LegacyQwenModel = "Qwen3 4B";
     public sealed class Entry
     {
         public int Manual { get; set; }

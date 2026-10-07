@@ -90,56 +90,47 @@ internal static class Program
                 Check(host.TextWorkerCount == 0);
             }
         });
-        await Test("Existing settings default to current; selection round-trip; unknown fallback", () =>
+        await Test("Only two models; legacy and unknown settings migrate to Qwen3.5", () =>
         {
-            Check(JsonSerializer.Deserialize<AppSettings>("{}")!.TextModel == TextModels.Current);
+            Check(TextModels.Choices.SequenceEqual(new[] { TextModels.Qwen35, TextModels.Gemma }));
+            Check(JsonSerializer.Deserialize<AppSettings>("{}")!.TextModel == TextModels.Qwen35);
             foreach (var model in TextModels.Choices) Check(JsonSerializer.Deserialize<AppSettings>(JsonSerializer.Serialize(new AppSettings { TextModel = model }))!.TextModel == model);
-            Check(TextModels.Normalize(null) == TextModels.Current && TextModels.Normalize("unknown") == TextModels.Current);
+            foreach (var legacy in new string?[] { null, "unknown", "Qwen3 4B", "Dynamic" })
+            {
+                Check(TextModels.Normalize(legacy) == TextModels.Qwen35);
+                var migrated = JsonSerializer.Deserialize<AppSettings>(JsonSerializer.Serialize(new { TextModel = legacy }))!;
+                Check(migrated.TextModel == TextModels.Qwen35);
+                Check(JsonSerializer.Deserialize<AppSettings>(JsonSerializer.Serialize(migrated))!.TextModel == TextModels.Qwen35);
+                Check(TextModels.PathFor(legacy!) == TextModels.PathFor(TextModels.Qwen35));
+            }
             return Task.CompletedTask;
         });
-        foreach (var model in TextModels.Choices.Where(m => m != TextModels.Dynamic))
-            await Test("Manual loads only " + model, async () => { using var r = new Rig(); r.Host.SetMode(model); await r.Host.EnsureReadyAsync(default); Check(r.Workers.Length == 1 && r.Host.ActiveModel == model && r.DelayCalls == 0); });
-        await Test("Dynamic delay is exactly five seconds after primary readiness", async () =>
+        foreach (var model in TextModels.Choices)
+            await Test("Manual loads only " + model, async () => { using var r = new Rig(); r.Host.SetMode(model); await r.Host.EnsureReadyAsync(default); Check(r.Workers.Length == 1 && r.Host.ActiveModel == model); });
+        await Test("Concurrent preload calls create one worker", async () =>
         {
-            using var r = new Rig { HoldPrimary = true }; r.Host.SetMode(TextModels.Dynamic);
-            var initial = r.Host.EnsureReadyAsync(default); await Until(() => r.Workers.Length == 1);
-            Check(r.DelayCalls == 0 && !r.Host.Ready); r.Workers[0].Complete(); await initial;
-            await Until(() => r.DelayCalls == 1); Check(r.DelayDuration == TimeSpan.FromSeconds(5));
-            Check(r.Workers.Length == 1 && r.Host.ActiveModel == TextModels.Current); r.Host.Stop(); await r.Host.UpgradeTask;
-        });
-        await Test("Candidate cannot replace Qwen before health readiness", async () =>
-        {
-            using var r = await Rig.Dynamic(); r.FireDelay(); await Until(() => r.Workers.Length == 2);
-            using var lease = r.Host.Acquire(); Check(lease.Worker.Model == TextModels.Current && !r.Workers[0].Disposed && r.Host.WorkerCount == 2);
-            r.Workers[1].Complete(); await r.Host.UpgradeTask; Check(r.Host.ActiveModel == TextModels.Gemma);
-        });
-        await Test("Handover drains all old requests; new requests use Gemma", async () =>
-        {
-            using var r = await Rig.Dynamic(); var first = r.Host.Acquire(); var second = r.Host.Acquire();
-            r.FireDelay(); await Until(() => r.Workers.Length == 2); r.Workers[1].Complete(); await r.Host.UpgradeTask;
-            using var latest = r.Host.Acquire(); Check(latest.Worker.Model == TextModels.Gemma && first.Worker.Model == TextModels.Current);
-            Check(!r.Workers[0].Disposed && r.Host.WorkerCount == 2); first.Dispose(); first.Dispose(); Check(!r.Workers[0].Disposed);
-            second.Dispose(); Check(r.Workers[0].Disposed && r.Host.WorkerCount == 1);
-        });
-        await Test("Idle old worker unloads immediately after Gemma is ready", async () =>
-        { using var r = await Rig.Dynamic(); r.FireDelay(); await Until(() => r.Workers.Length == 2); r.Workers[1].Complete(); await r.Host.UpgradeTask; Check(r.Workers[0].Disposed && !r.Workers[1].Disposed && r.Host.WorkerCount == 1); });
-        await Test("Concurrent preload calls create one primary and one upgrade", async () =>
-        {
-            using var r = new Rig { HoldPrimary = true }; r.Host.SetMode(TextModels.Dynamic);
+            using var r = new Rig { HoldPrimary = true };
             var tasks = Enumerable.Range(0, 12).Select(_ => r.Host.EnsureReadyAsync(default)).ToArray();
-            await Until(() => r.Workers.Length == 1); r.Workers[0].Complete(); await Task.WhenAll(tasks);
-            await Until(() => r.DelayCalls == 1); Check(r.Workers.Length == 1); r.FireDelay(); await Until(() => r.Workers.Length == 2);
-            r.Workers[1].Complete(); await r.Host.UpgradeTask; Check(r.Workers.Length == 2 && r.DelayCalls == 1);
+            await Until(() => r.Workers.Length == 1); Check(!r.Host.Ready);
+            r.Workers[0].Complete(); await Task.WhenAll(tasks); Check(r.Host.Ready && r.Workers.Length == 1);
         });
-        await Test("Stop before five seconds cancels upgrade and requests", async () =>
-        { using var r = await Rig.Dynamic(); using var lease = r.Host.Acquire(); r.Host.Stop(); r.FireDelay(); await r.Host.UpgradeTask; Check(lease.SessionToken.IsCancellationRequested && r.Workers.Length == 1 && r.Workers.All(w => w.Disposed) && r.Host.WorkerCount == 0); });
-        await Test("Stop during Gemma loading kills both without resurrection", async () =>
-        { using var r = await Rig.Dynamic(); r.FireDelay(); await Until(() => r.Workers.Length == 2); r.Host.Stop(); r.Workers[1].Complete(); await r.Host.UpgradeTask; Check(!r.Host.Ready && r.Host.WorkerCount == 0 && r.Workers.All(w => w.Disposed)); });
-        foreach (var error in new Exception[] { new FileNotFoundException(), new TimeoutException(), new InvalidOperationException("GPU allocation failed") })
-            await Test("Upgrade failure retains current: " + error.GetType().Name, async () =>
-            { using var r = await Rig.Dynamic(); r.FireDelay(); await Until(() => r.Workers.Length == 2); r.Workers[1].Fail(error); await r.Host.UpgradeTask; using var lease = r.Host.Acquire(); Check(lease.Worker.Model == TextModels.Current && r.Host.Ready && r.Workers[1].Disposed && r.Host.WorkerCount == 1 && r.Host.Status.Contains("unavailable")); });
-        await Test("Candidate factory failure retains current", async () =>
-        { using var r = await Rig.Dynamic(); r.FactoryFailure = true; r.FireDelay(); await r.Host.UpgradeTask; Check(r.Host.Ready && r.Host.ActiveModel == TextModels.Current && r.Host.WorkerCount == 1); });
+        await Test("Changing selected model cancels requests and releases old worker", async () =>
+        {
+            using var r = new Rig(); await r.Host.EnsureReadyAsync(default); using var lease = r.Host.Acquire();
+            r.Host.SetMode(TextModels.Gemma); Check(lease.SessionToken.IsCancellationRequested && r.Workers[0].Disposed && r.Host.WorkerCount == 0);
+            await r.Host.EnsureReadyAsync(default); Check(r.Host.ActiveModel == TextModels.Gemma && r.Host.WorkerCount == 1);
+        });
+        await Test("Stop cancels requests and releases selected worker", async () =>
+        {
+            using var r = new Rig(); await r.Host.EnsureReadyAsync(default); using var lease = r.Host.Acquire();
+            r.Host.Stop(); Check(lease.SessionToken.IsCancellationRequested && r.Workers[0].Disposed && r.Host.WorkerCount == 0);
+        });
+        await Test("Factory failure leaves no worker and can retry", async () =>
+        {
+            using var r = new Rig { FactoryFailure = true }; await Throws(() => r.Host.EnsureReadyAsync(default));
+            Check(!r.Host.Ready && r.Host.WorkerCount == 0); r.FactoryFailure = false;
+            await r.Host.EnsureReadyAsync(default); Check(r.Host.Ready && r.Host.WorkerCount == 1);
+        });
         await Test("Manual initial failure cleans worker and can retry", async () =>
         {
             using var r = new Rig { HoldPrimary = true }; var load = r.Host.EnsureReadyAsync(default); await Until(() => r.Workers.Length == 1); r.Workers[0].Fail(new Exception("load failure")); await Throws(() => load);
@@ -147,21 +138,24 @@ internal static class Program
         });
         await Test("Cancelling initial load disposes partial worker", async () =>
         { using var r = new Rig { HoldPrimary = true }; using var ct = new CancellationTokenSource(); var load = r.Host.EnsureReadyAsync(ct.Token); await Until(() => r.Workers.Length == 1); ct.Cancel(); await Throws(() => load); Check(r.Workers[0].Disposed && r.Host.WorkerCount == 0); });
-        await Test("Mode change cancels candidate; stale failure cannot stop new session", async () =>
+        await Test("Mode change during loading cancels candidate; new session loads chosen model", async () =>
         {
-            using var r = await Rig.Dynamic(); r.FireDelay(); await Until(() => r.Workers.Length == 2); var oldUpgrade = r.Host.UpgradeTask;
-            r.Host.SetMode(TextModels.Qwen35); await r.Host.EnsureReadyAsync(default); r.Workers[1].Fail(new Exception("late failure")); await oldUpgrade;
-            Check(r.Host.Ready && r.Host.ActiveModel == TextModels.Qwen35 && r.Host.WorkerCount == 1 && r.Workers.Take(2).All(w => w.Disposed));
+            using var r = new Rig { HoldPrimary = true }; var old = r.Host.EnsureReadyAsync(default); await Until(() => r.Workers.Length == 1);
+            r.Host.SetMode(TextModels.Gemma); r.HoldPrimary = false;
+            var newer = r.Host.EnsureReadyAsync(default); r.Workers[0].Fail(new Exception("late failure"));
+            await Throws(() => old); await newer;
+            Check(r.Host.Ready && r.Host.ActiveModel == TextModels.Gemma && r.Host.WorkerCount == 1 && r.Workers[0].Disposed);
         });
         await Test("Late initial completion cannot interfere with restarted model", async () =>
         {
             using var r = new Rig { HoldPrimary = true }; var old = r.Host.EnsureReadyAsync(default); await Until(() => r.Workers.Length == 1);
             r.Host.Stop(); r.HoldPrimary = false; var newer = r.Host.EnsureReadyAsync(default); r.Workers[0].Complete(); await Throws(() => old); await newer; Check(r.Host.Ready && r.Host.WorkerCount == 1);
         });
-        await Test("Crashed primary cancels stale upgrade and reloads safely", async () =>
+        await Test("Crashed worker cancels requests and reloads safely", async () =>
         {
-            using var r = await Rig.Dynamic(); r.FireDelay(); await Until(() => r.Workers.Length == 2); var old = r.Host.UpgradeTask; r.Workers[0].Crash();
-            await r.Host.EnsureReadyAsync(default); await old; Check(r.Workers[0].Disposed && r.Workers[1].Disposed && r.Host.ActiveModel == TextModels.Current && r.Host.WorkerCount == 1);
+            using var r = new Rig(); await r.Host.EnsureReadyAsync(default); using var old = r.Host.Acquire(); r.Workers[0].Crash();
+            await r.Host.EnsureReadyAsync(default);
+            Check(old.SessionToken.IsCancellationRequested && r.Workers[0].Disposed && r.Host.ActiveModel == TextModels.Qwen35 && r.Host.WorkerCount == 1);
         });
         await Test("Repeated stop/dispose and restart leak no fake workers", async () =>
         { using var r = new Rig(); for (var i = 0; i < 20; i++) { await r.Host.EnsureReadyAsync(default); r.Host.Stop(); r.Host.Stop(); Check(r.Host.WorkerCount == 0); } r.Host.Dispose(); r.Host.Dispose(); await Throws(() => r.Host.EnsureReadyAsync(default)); Check(r.Workers.All(w => w.Disposed)); });
@@ -177,8 +171,8 @@ internal static class Program
     private static async Task Integration(string[] args)
     {
         var audioIndex = Array.IndexOf(args, "--audio");
-        foreach (var model in new[] { TextModels.Current, TextModels.Qwen35, TextModels.Gemma }.Where(m => !args.Contains("--dynamic-only") && (!args.Contains("--gemma-only") || m == TextModels.Gemma)))
-            await Test("REAL speech + cleanup + polish + unload: " + model, async () =>
+        foreach (var model in TextModels.Choices.Where(m => !args.Contains("--gemma-only") || m == TextModels.Gemma))
+            await Test("REAL speech + cleanup + polish + reword + unload: " + model, async () =>
             {
                 using var host = new EngineHost(); host.SetTextModel(model); var watch = Stopwatch.StartNew(); await host.EnsureReadyAsync(default);
                 Check(host.Ready && host.ActiveTextModel == model && host.TextWorkerCount == 1);
@@ -187,55 +181,34 @@ internal static class Program
                 foreach (var source in new[] { "Um, please send the report at 3:30 on 2026-10-05.", "Run --dry-run.\n\nKeep the output in report.txt." })
                 {
                     var cleaned = await host.CleanupAsync(source, default); Check(EngineHost.PreservesNumbers(source, cleaned));
+                    var reworded = await host.RewordAsync(source, default); Check(EngineHost.PreservesRewordNumbers(source, reworded));
                     var polished = await host.SuggestAsync(source, default); Check(EngineHost.PreservesNumbers(source, polished));
                     if (source.Contains("--dry-run")) Check(cleaned.Contains("--dry-run") && polished.Contains("--dry-run") && cleaned.Contains('\n') && polished.Contains('\n'), "Flags/paragraphs preserved end to end");
                 }
                 host.Stop(); Check(!host.Ready && host.TextWorkerCount == 0);
             });
         if (args.Contains("--gemma-only")) return;
-        await Test("REAL dynamic overlap, in-flight edit, Gemma promotion and cleanup", async () =>
+        await Test("REAL stop during model loading and restart with different model", async () =>
         {
-            using var host = new EngineHost(); host.SetTextModel(TextModels.Dynamic); var watch = Stopwatch.StartNew();
-            host.TextStateChanged += () => Console.WriteLine($"  STATE {watch.Elapsed.TotalSeconds:F2}s {host.TextStatus}; workers={host.TextWorkerCount}");
-            await host.EnsureReadyAsync(default); Check(host.ActiveTextModel == TextModels.Current);
-            var longText = string.Join(" ", Enumerable.Range(1, 55).Select(i => $"For item {i}, please review the document and confirm the existing details before tomorrow."));
-            await Until(() => host.TextWorkerCount == 2); Check(host.ActiveTextModel == TextModels.Current);
-            var edit = host.CleanupAsync(longText, default);
-            Console.WriteLine($"  OVERLAP RAM {host.ModelWorkingSetBytes()/1073741824.0:F2} GiB");
-            await host.UpgradeTask; Check(host.ActiveTextModel == TextModels.Gemma);
-            Check(!edit.IsCompleted, "An actual Qwen edit must still be running at promotion");
-            Check(host.TextWorkerCount == 2, "Qwen remains resident for its active request");
-            var shortEdit = await host.CleanupAsync("Um, send the report at 3:30.", default); Check(shortEdit.Contains("3:30"));
-            var originalEdit = await edit; Check(EngineHost.PreservesNumbers(longText, originalEdit));
-            await Until(() => host.TextWorkerCount == 1); host.Stop(); Check(host.TextWorkerCount == 0);
+            using var host = new EngineHost(); host.SetTextModel(TextModels.Gemma); var loading = host.EnsureReadyAsync(default); await Task.Delay(250); host.Stop();
+            await Throws(() => loading); Check(host.TextWorkerCount == 0);
+            host.SetTextModel(TextModels.Qwen35); await host.EnsureTextReadyAsync(default); Check(host.ActiveTextModel == TextModels.Qwen35 && host.TextWorkerCount == 1); host.Stop();
         });
-        await Test("REAL stop during primary loading and immediate restart", async () =>
-        {
-            using var host = new EngineHost(); host.SetTextModel(TextModels.Dynamic); var loading = host.EnsureReadyAsync(default); await Task.Delay(250); host.Stop();
-            await Throws(() => loading); host.SetTextModel(TextModels.Current); await host.EnsureTextReadyAsync(default); Check(host.ActiveTextModel == TextModels.Current); host.Stop();
-        });
-        await Test("REAL stop during Gemma loading leaves no owned workers", async () =>
-        { using var host = new EngineHost(); host.SetTextModel(TextModels.Dynamic); await host.EnsureReadyAsync(default); await Until(() => host.TextWorkerCount == 2); host.Stop(); await host.UpgradeTask; Check(host.TextWorkerCount == 0 && !host.Ready); });
     }
     private sealed class Rig : IDisposable
     {
         public readonly TextModelHost Host;
         private readonly ConcurrentQueue<FakeWorker> workers = new();
         public FakeWorker[] Workers => workers.ToArray();
-        private readonly TaskCompletionSource delayed = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public bool HoldPrimary, FactoryFailure;
-        public int DelayCalls;
-        public TimeSpan DelayDuration;
         public Rig()
         {
             Host = new(model =>
             {
                 if (FactoryFailure) throw new FileNotFoundException();
-                var worker = new FakeWorker(model, HoldPrimary || (model == TextModels.Gemma && workers.Count > 0)); workers.Enqueue(worker); return worker;
-            }, async (duration, ct) => { DelayDuration = duration; Interlocked.Increment(ref DelayCalls); await delayed.Task.WaitAsync(ct); });
+                var worker = new FakeWorker(model, HoldPrimary); workers.Enqueue(worker); return worker;
+            });
         }
-        public static async Task<Rig> Dynamic() { var r = new Rig(); r.Host.SetMode(TextModels.Dynamic); await r.Host.EnsureReadyAsync(default); await Until(() => r.DelayCalls == 1); return r; }
-        public void FireDelay() => delayed.TrySetResult();
         public void Dispose() => Host.Dispose();
     }
     private sealed class FakeWorker : ITextWorker

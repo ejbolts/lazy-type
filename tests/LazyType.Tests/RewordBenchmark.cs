@@ -40,7 +40,7 @@ internal static class RewordBenchmark
             settings = "Production EngineHost; Q4_K_M; 4096 context; temperature 0; thinking off; one worker at a time. Load and warm-up excluded from edit timings.",
             loads, cases, results
         }, new JsonSerializerOptions { WriteIndented = true }));
-        foreach (var model in TextModels.Choices.Where(m => m != TextModels.Dynamic))
+        foreach (var model in TextModels.Choices)
         {
             using var host = new EngineHost();
             host.SetTextModel(model);

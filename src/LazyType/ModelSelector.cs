@@ -5,7 +5,7 @@ internal sealed class ModelSelector : UserControl
     private readonly Dictionary<string, ModernCheckBox> boxes = new();
     private readonly Label detail = new() { Dock = DockStyle.Bottom, Height = 22, AutoEllipsis = true };
     private bool updating;
-    private string selected = TextModels.Current;
+    private string selected = TextModels.Qwen35;
     public event Action? SelectionChanged;
     public string SelectedModel
     {
@@ -24,19 +24,18 @@ internal sealed class ModelSelector : UserControl
     }
     public ModelSelector()
     {
-        Height = 108;
+        Height = 78;
         detail.Font = new Font("Segoe UI", 8.5f);
         var title = new Label { Text = "Text model", Dock = DockStyle.Top, Height = 24, Font = new Font("Segoe UI", 10f, FontStyle.Bold) };
-        var choices = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 2, Margin = Padding.Empty };
+        var choices = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1, Margin = Padding.Empty };
         choices.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
         choices.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
-        choices.RowStyles.Add(new RowStyle(SizeType.Percent, 50));
-        choices.RowStyles.Add(new RowStyle(SizeType.Percent, 50));
+        choices.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         for (var i = 0; i < TextModels.Choices.Length; i++)
         {
             var model = TextModels.Choices[i];
             var box = new ModernCheckBox { Dock = DockStyle.Left, Width = 28, AccessibleName = model, Checked = model == selected };
-            var label = new Label { Text = model == TextModels.Current ? model + " (current)" : model,
+            var label = new Label { Text = model,
                 Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft, Cursor = Cursors.Hand };
             var row = new Panel { Dock = DockStyle.Fill, Margin = Padding.Empty };
             row.Controls.Add(label); row.Controls.Add(box);
@@ -49,7 +48,7 @@ internal sealed class ModelSelector : UserControl
         SetStatus("Models unloaded");
     }
     public void SetStatus(string status) => detail.Text = status == "Models unloaded"
-        ? selected == TextModels.Dynamic ? "Qwen first; load Gemma 5s after Qwen is ready." : "Loads when you start dictating."
+        ? "Loads when you start dictating."
         : status;
     public void ApplyTheme(bool dark)
     {

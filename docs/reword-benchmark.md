@@ -1,5 +1,7 @@
 # Reword model comparison
 
+This historical comparison includes Qwen3 4B, which has since been removed from the app. New benchmark runs compare Qwen3.5 9B and Gemma 4 12B only.
+
 **Qwen3.5 9B is the best overall choice for Reword in this sample.** Gemma 4 12B produces similarly concise rewrites and is the strongest minimal copy editor here, but takes longer and changes an explicitly verbatim sentence in one Reword case. Qwen3 4B is the fastest and preserves the broad intent, but often leaves repetition and occasionally produces awkward punctuation.
 
 ## Measurement

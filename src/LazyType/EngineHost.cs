@@ -26,7 +26,6 @@ internal sealed class EngineHost : IDisposable
     public string TextStatus => textModels.Status;
     public string? ActiveTextModel => textModels.ActiveModel;
     internal int TextWorkerCount => textModels.WorkerCount;
-    internal Task UpgradeTask => textModels.UpgradeTask;
     public EngineHost()
     {
         textModels = new(model => new LlamaWorker(model, http));
@@ -43,7 +42,7 @@ internal sealed class EngineHost : IDisposable
         }
     }
     public static string SpeechModel => Path.Combine(AppSettings.Root, "models", "whisper-turbo-q5.bin");
-    public static string TextModel => TextModels.PathFor(TextModels.Current);
+    public static string TextModel => TextModels.PathFor(TextModels.Qwen35);
     public static string Executable(string engine, string file)
     {
         var folder = Path.Combine(AppSettings.Root, "engines", engine);

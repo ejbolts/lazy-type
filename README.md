@@ -41,7 +41,7 @@ Use `--text-model qwen35`, `gemma`, or `dynamic` to install only the correspondi
 
 Click **Usage** beside **Text model** in the main window (or choose **Model usage** from the gear or tray menu) to see how often each text model has cleaned your dictation. Each cleaned dictation counts once, for the model that actually edited it: in **Dynamic**, that is Qwen before the handover and Gemma after it. Manual selections count the same way. Each model shows its share of all dictations, the words you spoke to it, the average words per dictation, and how many came from Dynamic or a manual choice.
 
-Raw dictations, failed cleanups and wording checks are not counted. Counts update live while the window is open. **Reset counts** clears them after confirmation. Counts are saved after every dictation in `usage.json` (in the app folder above), so they carry over when the app restarts or updates. Only counts are saved; your words are never stored. An unreadable file is kept as `usage.json.unreadable` rather than overwritten. Isolated test sessions keep their counts in memory only.
+Raw dictations, failed cleanups and wording checks are not counted. Counts update live while the window is open. Counts are saved after every dictation in `usage.json` (in the app folder above), so they carry over when the app restarts or updates. Only counts are saved; your words are never stored. An unreadable file is kept as `usage.json.unreadable` rather than overwritten. Isolated test sessions keep their counts in memory only.
 
 ## AI suggestions
 

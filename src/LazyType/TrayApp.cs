@@ -120,7 +120,6 @@ internal sealed class TrayApp : ApplicationContext
         if (closing) return;
         if (usageForm != null) { usageForm.ShowStats(usage); usageForm.Activate(); return; }
         var dialog = new UsageForm(ThemeController.Resolve(settings.Theme, ThemeController.IsSystemDark));
-        dialog.ResetRequested += () => { usage.Reset(); if (!testSession) usage.Save(); dialog.ShowStats(usage); };
         dialog.FormClosed += (_, _) => { if (usageForm == dialog) usageForm = null; dialog.Dispose(); };
         dialog.ShowStats(usage);
         usageForm = dialog;

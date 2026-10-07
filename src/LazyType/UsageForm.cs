@@ -34,9 +34,8 @@ internal sealed class UsageForm : Form
     private static readonly string[] Models = { TextModels.Current, TextModels.Qwen35, TextModels.Gemma };
     private readonly Label title = new(), summary = new(), note = new();
     private readonly Dictionary<string, Row> rows = new();
-    private readonly ModernButton reset = new(), close = new();
+    private readonly ModernButton close = new();
     private bool isDark;
-    public event Action? ResetRequested;
 
     public UsageForm(bool dark)
     {
@@ -83,18 +82,10 @@ internal sealed class UsageForm : Form
         note.Dock = DockStyle.Bottom; note.Height = 48;
 
         var actions = new Panel { Dock = DockStyle.Bottom, Height = 46, Padding = new Padding(0, 10, 0, 0) };
-        reset.Text = "Reset counts"; reset.Style = ModernButton.ButtonStyle.Secondary;
-        reset.Dock = DockStyle.Left; reset.Width = 124;
-        reset.Click += (_, _) =>
-        {
-            if (MessageBox.Show(this, "Reset all model usage counts? This can't be undone.", "Reset model usage",
-                MessageBoxButtons.YesNo, MessageBoxIcon.Question, MessageBoxDefaultButton.Button2) == DialogResult.Yes)
-                ResetRequested?.Invoke();
-        };
         close.Text = "Close"; close.Style = ModernButton.ButtonStyle.Primary;
         close.Dock = DockStyle.Right; close.Width = 96;
         close.Click += (_, _) => Close();
-        actions.Controls.Add(reset); actions.Controls.Add(close);
+        actions.Controls.Add(close);
 
         Controls.Add(list); Controls.Add(note); Controls.Add(actions); Controls.Add(summary); Controls.Add(title);
         ApplyTheme(dark);
@@ -118,7 +109,6 @@ internal sealed class UsageForm : Form
                 : $"{Plural(entry.Words, "word")} · {entry.Words / (double)entry.Dictations:N0} per dictation · {entry.Dynamic:N0} Dynamic · {entry.Manual:N0} manual";
             row.Count.ForeColor = entry.Dictations == 0 ? MutedColor : ForeColor;
         }
-        reset.Enabled = total > 0;
     }
 
     // CenterParent only applies to modal dialogs, so centre this modeless window over its owner by hand.
@@ -149,7 +139,7 @@ internal sealed class UsageForm : Form
             row.Bar.Fill = dark ? Color.FromArgb(160, 125, 240) : Color.FromArgb(127, 86, 217);
             row.Bar.Invalidate();
         }
-        reset.IsDark = close.IsDark = dark;
+        close.IsDark = dark;
         if (IsHandleCreated) SetTitleBar();
         Invalidate(true);
     }

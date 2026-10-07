@@ -29,7 +29,6 @@ public sealed class ModelUsage
         if (dynamic) entry.Dynamic++; else entry.Manual++;
         entry.Words += CountWords(spoken);
     }
-    public void Reset() { Models.Clear(); Since = DateTimeOffset.Now; }
     // Spoken words, so "3:30" and "state-of-the-art" are one word each.
     internal static int CountWords(string text) => Regex.Matches(text, @"\S+").Count(m => m.Value.Any(char.IsLetterOrDigit));
 

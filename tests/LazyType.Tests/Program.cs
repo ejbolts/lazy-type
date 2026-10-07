@@ -130,7 +130,7 @@ internal static class Program
         });
         await Test("Repeated stop/dispose and restart leak no fake workers", async () =>
         { using var r = new Rig(); for (var i = 0; i < 20; i++) { await r.Host.EnsureReadyAsync(default); r.Host.Stop(); r.Host.Stop(); Check(r.Host.WorkerCount == 0); } r.Host.Dispose(); r.Host.Dispose(); await Throws(() => r.Host.EnsureReadyAsync(default)); Check(r.Workers.All(w => w.Disposed)); });
-        await Test("Model usage counts each cleanup per model, mode and words; survives save format; resets", () =>
+        await Test("Model usage counts each cleanup per model, mode and words; survives save format", () =>
         {
             var usage = new ModelUsage();
             Check(usage.Dictations == 0 && usage.For(TextModels.Gemma).Dictations == 0);
@@ -143,7 +143,6 @@ internal static class Program
             Check(!json.Contains("Dictations") && !json.Contains("report"), "Only counts are stored");
             var loaded = JsonSerializer.Deserialize<ModelUsage>(json)!;
             Check(loaded.Dictations == 3 && loaded.Since == usage.Since && loaded.For(TextModels.Gemma).Words == 3, "Round-trip");
-            loaded.Reset(); Check(loaded.Dictations == 0 && loaded.Since >= usage.Since);
             return Task.CompletedTask;
         });
         await Test("Model usage persists across restarts and keeps an unreadable file", () =>

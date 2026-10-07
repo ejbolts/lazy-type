@@ -16,7 +16,7 @@ internal sealed class MainForm : Form
     // Setting rows controls
     public readonly ComboBox Mic = new();
     public readonly ModernCheckBox Clean = new();
-    public readonly ComboBox EditModeChoice = new();
+    public readonly ModernCheckBox Reword = new();
     public readonly ModernCheckBox Suggestions = new();
     public readonly ModernCheckBox Startup = new();
     public readonly ModelSelector Models = new();
@@ -29,6 +29,9 @@ internal sealed class MainForm : Form
     private readonly BufferedPanel editorPanel = new();
     public readonly TextBox Result = new();
     public readonly TextBox Original = new();
+    // Native Windows text boxes need CRLF to display paragraphs. Keep the
+    // application text in LF form so preview comparisons remain consistent.
+    public string ResultText { get => Result.Text.ReplaceLineEndings("\n"); set => Result.Text = value.ReplaceLineEndings("\r\n"); }
     private readonly WandButton suggest = new();
     private readonly ModernButton copyBtn = new();
     private readonly ModernButton cleanBtn = new();
@@ -64,13 +67,14 @@ internal sealed class MainForm : Form
         Text = "Lazy Type";
         Font = new Font("Segoe UI", 10f);
         AutoScaleMode = AutoScaleMode.Dpi;
-        ClientSize = new Size(580, 720);
-        MinimumSize = new Size(520, 680);
+        ClientSize = new Size(580, 772);
+        MinimumSize = new Size(520, 732);
         StartPosition = FormStartPosition.CenterScreen;
         Icon = Native.MakeIcon(Color.FromArgb(127, 86, 217));
         DoubleBuffered = true;
 
         Clean.Text = string.Empty;
+        Reword.Text = string.Empty;
         Suggestions.Text = string.Empty;
         Startup.Text = string.Empty;
 
@@ -110,7 +114,7 @@ internal sealed class MainForm : Form
 
 
         // --- 3. Settings Rows ---
-        var settingsContainer = new BufferedPanel { Dock = DockStyle.Top, Height = 210, Padding = new Padding(0, 10, 0, 10) };
+        var settingsContainer = new BufferedPanel { Dock = DockStyle.Top, Height = 262, Padding = new Padding(0, 10, 0, 10) };
 
         // Setting 1: Microphone
         var micRow = CreateSettingRow(g => VectorIcons.DrawMicrophone(g, new Rectangle(0, 0, 20, 20), GetIconColor()),
@@ -122,19 +126,11 @@ internal sealed class MainForm : Form
         // Setting 2: Clean up speech
         var cleanRow = CreateSettingRow(g => VectorIcons.DrawCleanSpeech(g, new Rectangle(0, 0, 20, 20), GetIconColor()),
             "Clean up speech", null, Clean);
-        EditModeChoice.DropDownStyle = ComboBoxStyle.DropDownList;
-        EditModeChoice.Items.AddRange(new object[] { TextEditModes.Cleanup, TextEditModes.Reword });
-        EditModeChoice.SelectedIndex = 0;
-        EditModeChoice.Enabled = false;
-        EditModeChoice.AccessibleName = "Speech editing mode";
-        EditModeChoice.Width = 110;
-        EditModeChoice.Anchor = AnchorStyles.Top | AnchorStyles.Right;
-        cleanRow.Controls.Add(EditModeChoice);
-        EditModeChoice.BringToFront();
-        cleanRow.Resize += (_, _) => EditModeChoice.SetBounds(cleanRow.Width - 154, 8, 110, 28);
-        tips.SetToolTip(EditModeChoice, "Clean up keeps your wording. Reword removes repetition and reorganises ideas while preserving meaning.");
-        Clean.AccessibleName = "Edit speech";
-        Clean.CheckedChanged += (_, _) => EditModeChoice.Enabled = Clean.Checked && !suggestionBusy;
+        Clean.AccessibleName = "Clean up speech";
+        var rewordRow = CreateSettingRow(g => PolishIcon.Draw(g, new Rectangle(0, 0, 20, 20), Color.FromArgb(127, 86, 217)),
+            "Reword speech", "Reorganise and condense using Gemma 4", Reword);
+        Reword.AccessibleName = "Reword speech using Gemma 4";
+        tips.SetToolTip(Reword, "Use Gemma 4 to remove repetition and reorganise speech while preserving details. Takes priority over Clean up speech. Raw dictation bypasses both.");
 
         // Setting 3: AI suggestions
         var suggestionsRow = CreateSettingRow(g => PolishIcon.Draw(g, new Rectangle(0, 0, 20, 20), Color.FromArgb(127, 86, 217)),
@@ -146,12 +142,14 @@ internal sealed class MainForm : Form
 
         settingsContainer.Controls.Add(startupRow);
         settingsContainer.Controls.Add(suggestionsRow);
+        settingsContainer.Controls.Add(rewordRow);
         settingsContainer.Controls.Add(cleanRow);
         settingsContainer.Controls.Add(micRow);
 
         // Layout rows vertically
         micRow.Dock = DockStyle.Top;
         cleanRow.Dock = DockStyle.Top;
+        rewordRow.Dock = DockStyle.Top;
         suggestionsRow.Dock = DockStyle.Top;
         startupRow.Dock = DockStyle.Top;
 
@@ -200,7 +198,7 @@ internal sealed class MainForm : Form
             cleanBtn.SetBounds(resultHeader.Width - 290, 0, 92, 28);
             rewordBtn.SetBounds(resultHeader.Width - 192, 0, 92, 28);
         };
-        tips.SetToolTip(rewordBtn, "Remove rambling and repetition, reorganise ideas, and review before applying.");
+        tips.SetToolTip(rewordBtn, "Reword with Gemma 4: remove repetition, reorganise ideas, and review before applying.");
         Result.AccessibleName = "Last result";
 
         resultHeader.Controls.Add(resultTitle);
@@ -502,6 +500,7 @@ internal sealed class MainForm : Form
         accordionLabel.ForeColor = dark ? Color.FromArgb(160, 175, 200) : Color.FromArgb(100, 116, 139);
 
         Clean.IsDark = dark;
+        Reword.IsDark = dark;
         Suggestions.IsDark = dark;
         Startup.IsDark = dark;
         Models.ApplyTheme(dark);
@@ -573,7 +572,7 @@ internal sealed class MainForm : Form
     {
         suggestionBusy = busy;
         Clean.Enabled = !busy;
-        EditModeChoice.Enabled = !busy && Clean.Checked;
+        Reword.Enabled = !busy;
         UpdateSuggestionButton();
     }
 

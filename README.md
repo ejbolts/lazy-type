@@ -23,9 +23,9 @@ For the alternate Ctrl+Shift+Space hotkey, add Alt for raw dictation. For F8, us
 
 ## Clean up and Reword
 
-With **Clean up speech** enabled, choose **Clean up** (the default) or **Reword** in the adjacent menu. Clean up makes minimal grammar and punctuation edits. Reword removes rambling and repeated ideas, reorganises the wording, and expresses the main point directly while retaining distinct details, conditions and intended meaning. The raw dictation shortcut bypasses either mode. The choice is saved and locked during processing.
+**Clean up speech** makes minimal grammar and punctuation edits using the selected Clean up / Polish model. Turn on the separate **Reword speech** toggle for a stronger rewrite using **Gemma 4 12B**, regardless of the selected model. Reword removes rambling and repeated ideas, reorganises the wording, and expresses the main point directly while retaining distinct details, conditions and intended meaning. Reword takes priority when both toggles are on and works even if Clean up speech is off. Turn it off to return to your cleanup preference. The raw dictation shortcut bypasses both. Reword is off by default; the preference is saved and locked during recording or processing. Existing saved Reword mode selections enable the new toggle.
 
-For an existing paragraph or transcript, type or paste into **Last result** and click **Clean up** or **Reword**. Both work independently of the AI suggestions toggle. Review the comparison, then choose **Apply clean up** / **Apply reword**, **Keep original**, or **Copy**. Manual edits only update Last result; they do not replace text in another app. The source remains under Original transcript. Editing Last result while a preview is open invalidates that preview. Escape cancels an active edit and releases the model; the microphone is never opened.
+For an existing paragraph or transcript, type or paste into **Last result** and click **Clean up** or **Reword**. Both work independently of the speech editing and AI suggestions toggles. The Reword button always uses Gemma 4; Clean up and the Polish wand use the selected model. Review the comparison, then choose **Apply clean up** / **Apply reword**, **Keep original**, or **Copy**. Manual edits only update Last result; they do not replace text in another app. The source remains under Original transcript. Editing Last result while a preview is open invalidates that preview. Escape cancels an active edit and releases the model; the microphone is never opened.
 
 Manual edits and Reword accept up to 6,000 characters. Incomplete or invalid edits keep the source text. Reword permits repeated numeric mentions to be combined but rejects lost or invented distinct numeric values and changed command flags or identifiers with underscores. These checks cannot establish semantic equivalence: review names, qualifications and quoted wording before applying. Numeric self-corrections that remove a distinct value may be rejected conservatively.
 
@@ -39,7 +39,7 @@ The benchmark uses the production prompts, model settings, parser and validation
 
 ## Text model selection
 
-Choose **Qwen3.5 9B** or **Gemma 4 12B** in **Text model**. Qwen3.5 is the default and recommended Reword choice from the local benchmark. Gemma is an alternative for minimal cleanup. The selection is saved; older Qwen3 4B, Dynamic, and unknown selections migrate to Qwen3.5. Only the chosen model loads. Choices are locked while recording or editing; change them when idle or paused. Escape, Pause, Quit, and normal completion release the worker.
+Choose **Qwen3.5 9B** or **Gemma 4 12B** in **Clean up / Polish model**. Qwen3.5 is the default for these edits. Reword always uses Gemma 4, including the manual Reword button. The selection is saved; older Qwen3 4B, Dynamic, and unknown selections migrate to Qwen3.5. Only the model required for the current edit loads; a later Polish check restores the selected model, releasing Gemma before loading another model. Choices are locked while recording or editing; change them when idle or paused. Escape, Pause, Quit, and normal completion release the worker.
 
 Install both choices with:
 
@@ -47,7 +47,7 @@ Install both choices with:
 python scripts/setup_models.py --text-model all
 ```
 
-The setup and installer default to Qwen3.5. Use `--text-model gemma` to download Gemma instead, or pass `-TextModel all` to `scripts/install.ps1`. Pinned Q4_K_M files are approximately 5.68 GB for Qwen3.5 and 7.12 GB for Gemma. Existing benchmark downloads under `benchmarks/*/models` are reused without copying them. Selecting a model does not download it; a missing model is reported when used. Previously downloaded models remain on disk. Both models run with thinking disabled for bounded editing responses.
+The setup and installer default to both models so Reword is ready alongside Qwen3.5 cleanup. Use `--text-model gemma` to install only Gemma or `--text-model qwen35` for only Qwen3.5 (Reword then needs Gemma installed separately), or pass `-TextModel all` to `scripts/install.ps1`. Pinned Q4_K_M files are approximately 5.68 GB for Qwen3.5 and 7.12 GB for Gemma. Existing benchmark downloads under `benchmarks/*/models` are reused without copying them. Selecting a model does not download it; a missing model is reported when used. Previously downloaded models remain on disk. Both models run with thinking disabled for bounded editing responses.
 
 ## AI suggestions
 
@@ -65,7 +65,7 @@ Turn on **AI suggestions · check wording after dictation** in the main window. 
 
 The marks and bar never take focus, so you can keep typing. Labels sit on whichever side covers less of your other text. The wand beside **Last result** in Lazy Type runs the same check on demand and shows the comparison in the pop-up.
 
-**How this differs from cleanup.** Both use the selected local text model with different instructions. Cleanup is automatic and minimal: it corrects grammar, punctuation and capitalisation, removes fillers, false starts and pause dashes, resolves self-corrections, and otherwise keeps your wording. Suggestions may reword awkward phrasing and improve flow, so they are only applied when you choose. Both keep facts, names, numbers and dates, and never answer questions or follow instructions in the dictation. A suggestion that changes too much or alters a number is discarded.
+**How this differs from cleanup.** Cleanup and suggestions use the selected local text model with different instructions; Reword uses Gemma 4. Cleanup is automatic and minimal: it corrects grammar, punctuation and capitalisation, removes fillers, false starts and pause dashes, resolves self-corrections, and otherwise keeps your wording. Suggestions may reword awkward phrasing and improve flow, so they are only applied when you choose. Both keep facts, names, numbers and dates, and never answer questions or follow instructions in the dictation. A suggestion that changes too much or alters a number is discarded.
 
 **Limits and safety.**
 

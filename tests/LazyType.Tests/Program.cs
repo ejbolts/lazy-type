@@ -34,18 +34,22 @@ internal static class Program
         {
             var buttons = Descendants(form).OfType<Button>().Where(b => b.Text is TextEditModes.Cleanup or TextEditModes.Reword).ToArray();
             Check(buttons.Length == 2 && buttons.All(b => !b.Enabled), "Empty result disables both manual actions");
-            Check(!form.EditModeChoice.Enabled && form.EditModeChoice.Items.Cast<string>().SequenceEqual(new[] { TextEditModes.Cleanup, TextEditModes.Reword }));
+            Check(form.Reword.Enabled && !form.Reword.Checked, "Reword is opt-in and independent of cleanup");
             form.Clean.Checked = true;
             form.Result.Text = "Sample paragraph.";
-            Check(form.EditModeChoice.Enabled && buttons.All(b => b.Enabled), "Manual edits work without AI suggestions");
+            Check(form.Reword.Enabled && buttons.All(b => b.Enabled), "Manual edits work without AI suggestions");
             form.SetSuggestionBusy(true);
             form.Result.Text = "Changed while busy.";
-            Check(!form.Clean.Enabled && !form.EditModeChoice.Enabled && buttons.All(b => !b.Enabled));
+            Check(!form.Clean.Enabled && !form.Reword.Enabled && buttons.All(b => !b.Enabled));
             form.SetSuggestionBusy(false);
-            Check(form.Clean.Enabled && form.EditModeChoice.Enabled && buttons.All(b => b.Enabled));
+            Check(form.Clean.Enabled && form.Reword.Enabled && buttons.All(b => b.Enabled));
             form.Clean.Checked = false;
-            Check(!form.EditModeChoice.Enabled && buttons.All(b => b.Enabled), "Speech editing preference does not disable manual edits");
-            passed++; Console.WriteLine("PASS Native editing mode and empty/busy/manual action states");
+            Check(form.Reword.Enabled && buttons.All(b => b.Enabled), "Cleanup off does not disable Reword or manual edits");
+            form.Reword.Checked = true; Check(form.Reword.Checked);
+            form.ResultText = "First paragraph.\n\nSecond paragraph.";
+            Check(form.Result.Lines.SequenceEqual(new[] { "First paragraph.", "", "Second paragraph." }), "Native editor displays the blank paragraph break");
+            Check(form.ResultText == "First paragraph.\n\nSecond paragraph.", "App text stays consistent for preview comparisons");
+            passed++; Console.WriteLine("PASS Native reword toggle and empty/busy/manual action states");
         }
         SynchronizationContext.SetSynchronizationContext(null);
         if (args.Contains("--benchmark")) return await RewordBenchmark.Run(args);
@@ -64,6 +68,28 @@ internal static class Program
             Check(JsonSerializer.Deserialize<AppSettings>(JsonSerializer.Serialize(new AppSettings { EditMode = TextEditModes.Reword }))!.EditMode == TextEditModes.Reword);
             Check(TextEditModes.Normalize("unknown") == TextEditModes.Cleanup);
             return Task.CompletedTask;
+        });
+        await Test("Speech toggle routing preserves cleanup and raw preferences", () =>
+        {
+            Check(TextEditModes.ForSpeech(true, TextEditModes.Cleanup) == TextEditModes.Cleanup);
+            Check(TextEditModes.ForSpeech(false, TextEditModes.Cleanup) == null);
+            Check(TextEditModes.ForSpeech(true, TextEditModes.Reword) == TextEditModes.Reword);
+            Check(TextEditModes.ForSpeech(false, TextEditModes.Reword) == TextEditModes.Reword);
+            return Task.CompletedTask;
+        });
+        await Test("Reword always selects Gemma; subsequent cleanup and polish restore selection", async () =>
+        {
+            foreach (var selected in TextModels.Choices)
+            {
+                using var rig = new Rig();
+                rig.Host.SetMode(TextModels.ForEdit(selected, TextEditModes.Reword)); await rig.Host.EnsureReadyAsync(default);
+                Check(rig.Host.ActiveModel == TextModels.Gemma && rig.Host.WorkerCount == 1);
+                foreach (var mode in new string?[] { TextEditModes.Cleanup, null })
+                {
+                    rig.Host.SetMode(TextModels.ForEdit(selected, mode)); await rig.Host.EnsureReadyAsync(default);
+                    Check(rig.Host.ActiveModel == selected && rig.Host.WorkerCount == 1);
+                }
+            }
         });
         await Test("Reword permits repetition removal and guards numeric details", () =>
         {

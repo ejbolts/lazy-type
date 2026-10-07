@@ -6,6 +6,7 @@ internal static class TextModels
     public const string Gemma = "Gemma 4 12B";
     public static readonly string[] Choices = { Qwen35, Gemma };
     public static string Normalize(string? choice) => Choices.Contains(choice) ? choice! : Qwen35;
+    public static string ForEdit(string? selected, string? editMode) => editMode == TextEditModes.Reword ? Gemma : Normalize(selected);
 
     public static string PathFor(string choice)
     {

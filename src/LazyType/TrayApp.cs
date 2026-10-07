@@ -52,8 +52,8 @@ internal sealed class TrayApp : ApplicationContext
         settings.Microphone = devices[form.Mic.SelectedIndex].Id;
         form.Clean.Checked = settings.Cleanup;
         settings.EditMode = TextEditModes.Normalize(settings.EditMode);
-        form.EditModeChoice.SelectedItem = settings.EditMode;
-        form.EditModeChoice.SelectedIndexChanged += (_, _) => { settings.EditMode = form.EditModeChoice.SelectedItem!.ToString()!; SaveSettings(); };
+        form.Reword.Checked = settings.EditMode == TextEditModes.Reword;
+        form.Reword.CheckedChanged += (_, _) => { settings.EditMode = form.Reword.Checked ? TextEditModes.Reword : TextEditModes.Cleanup; SaveSettings(); };
         form.Startup.Checked = !testSession && AppSettings.Startup;
         form.Startup.Enabled = !testSession;
         form.Suggestions.Checked = settings.Suggestions;
@@ -147,6 +147,7 @@ internal sealed class TrayApp : ApplicationContext
         var token = lifetime.Token;
         try
         {
+            SelectTextModel(rawMode ? null : settings.EditMode);
             await engines.EnsureReadyAsync(token);
         }
         // Recording continues if preload fails; processing will retry and report errors.
@@ -160,6 +161,8 @@ internal sealed class TrayApp : ApplicationContext
         lifetime = new(); previous.Dispose();
     }
 
+    private void SelectTextModel(string? editMode) => engines.SetTextModel(TextModels.ForEdit(settings.TextModel, editMode));
+
     private async Task ToggleAsync(bool raw)
     {
         if (closing) return;
@@ -170,7 +173,7 @@ internal sealed class TrayApp : ApplicationContext
         {
             if (paused) Resume();
             target = testSession ? null : TextTarget.Capture();
-            rawMode = raw || !settings.Cleanup;
+            rawMode = raw || TextEditModes.ForSpeech(settings.Cleanup, settings.EditMode) == null;
             if (testAudio == null)
             {
                 var next = new Microphone(settings.Microphone);
@@ -227,11 +230,12 @@ internal sealed class TrayApp : ApplicationContext
     {
         overlay.Present(engines.Ready ? "Transcribing…" : "Loading local models…");
         Status("Transcribing your speech", "Microphone off · Processing locally");
+        SelectTextModel(raw ? null : settings.EditMode);
         await engines.EnsureReadyAsync(ct);
         overlay.Present("Transcribing…");
         var timer = Stopwatch.StartNew();
         var transcript = await engines.TranscribeAsync(wav, ct);
-        ct.ThrowIfCancellationRequested(); form.Original.Text = transcript;
+        ct.ThrowIfCancellationRequested(); form.Original.Text = transcript.ReplaceLineEndings("\r\n");
         if (string.IsNullOrWhiteSpace(transcript)) { Status("No speech detected · models unloaded", "Microphone off · Nothing inserted."); return; }
         var result = transcript; var fallback = false;
         if (!raw)
@@ -246,7 +250,7 @@ internal sealed class TrayApp : ApplicationContext
                 AppLog.Write("Cleanup failed; original transcript retained with pause dashes removed.");
             }
         }
-        ct.ThrowIfCancellationRequested(); form.Result.Text = result;
+        ct.ThrowIfCancellationRequested(); form.ResultText = result;
         if (!testSession) Native.SetClipboardText(result);
         // Inference is finished; release GPU allocations before clipboard insertion, unless the text model is
         // about to check the wording of this dictation.
@@ -294,7 +298,7 @@ internal sealed class TrayApp : ApplicationContext
             using var resampler = new MediaFoundationResampler(reader, new WaveFormat(16000, 16, 1));
             using var buffer = new MemoryStream();
             WaveFileWriter.WriteWavFileToStream(buffer, resampler);
-            await ProcessAudioAsync(buffer.ToArray(), !settings.Cleanup, null, ct);
+            await ProcessAudioAsync(buffer.ToArray(), TextEditModes.ForSpeech(settings.Cleanup, settings.EditMode) == null, null, ct);
         }
         catch (OperationCanceledException) { }
         catch (Exception e) { if (!ct.IsCancellationRequested) Report(e); }
@@ -319,12 +323,12 @@ internal sealed class TrayApp : ApplicationContext
     // is something to change; otherwise it closes quietly.
     private async Task SuggestAsync(TextTarget? destination, bool automatic = false, string? editMode = null)
     {
-        if ((editMode == null && !settings.Suggestions) || recording || processing || paused || closing || string.IsNullOrWhiteSpace(form.Result.Text)) return;
-        var source = form.Result.Text;
+        if ((editMode == null && !settings.Suggestions) || recording || processing || paused || closing || string.IsNullOrWhiteSpace(form.ResultText)) return;
+        var source = form.ResultText;
         CloseSuggestion();
         var popupDark = ThemeController.Resolve(settings.PopupTheme, ThemeController.Resolve(settings.Theme, ThemeController.IsSystemDark));
         var preview = new SuggestionForm(source, destination != null, popupDark, editMode) { Passive = automatic };
-        if (editMode != null) form.Original.Text = source;
+        if (editMode != null) form.Original.Text = source.ReplaceLineEndings("\r\n");
         suggestionForm = preview;
         var anchor = destination != null && destination.TryGetBounds(out var field) ? field : form.Bounds;
         void PositionPreview()
@@ -358,10 +362,11 @@ internal sealed class TrayApp : ApplicationContext
         try
         {
             if (source.Length > 6000) throw new InvalidOperationException((editMode ?? "Suggestions") + " supports up to 6,000 characters. Shorten the result and try again.");
+            SelectTextModel(editMode);
             await engines.EnsureTextReadyAsync(ct);
             var text = editMode == null ? await engines.SuggestAsync(source, ct) : await engines.RewriteAsync(source, editMode, ct);
             ct.ThrowIfCancellationRequested();
-            if (suggestionForm == preview && form.Result.Text == source)
+            if (suggestionForm == preview && form.ResultText == source)
             {
                 if (automatic && !TextDiff.HasChanges(TextDiff.Compare(source, text)))
                 {
@@ -387,6 +392,7 @@ internal sealed class TrayApp : ApplicationContext
             else if (!ct.IsCancellationRequested && suggestionForm == preview)
             {
                 preview.ShowFailure(source.Length > 6000 ? (editMode ?? "Suggestions") + " supports up to 6,000 characters. Shorten the result and try again. Your text is unchanged."
+                    : editMode == TextEditModes.Reword && (e is FileNotFoundException or DirectoryNotFoundException) ? "Gemma 4 is required for Reword. Install its model files and try again. Your text is unchanged."
                     : (editMode ?? "Suggestion") + " unavailable. Your text is unchanged. Close and try again.");
                 highlight.Dismiss();
                 Status("Suggestion unavailable · models unloaded", e.Message);
@@ -421,7 +427,7 @@ internal sealed class TrayApp : ApplicationContext
         var preview = suggestionForm; var destination = suggestionDestination; var source = suggestionSource;
         var parts = suggestionParts; var marks = suggestionMarks;
         if (processing || preview == null || destination == null || source == null || parts == null || marks == null
-            || index < 0 || index >= marks.Count || form.Result.Text != source || !settings.Suggestions) { highlight.Release(); return; }
+            || index < 0 || index >= marks.Count || form.ResultText != source || !settings.Suggestions) { highlight.Release(); return; }
         var text = TextDiff.ApplyOne(parts, marks[index]);
         var suggested = preview.SuggestedText;
         processing = true; suggesting = true; SetBusy(true);
@@ -435,7 +441,7 @@ internal sealed class TrayApp : ApplicationContext
                 ct.ThrowIfCancellationRequested();
                 destination.RememberInsertion(text);
                 updatingResult = true;
-                try { form.Result.Text = text; }
+                try { form.ResultText = text; }
                 finally { updatingResult = false; }
                 if (TextDiff.HasChanges(TextDiff.Compare(text, suggested)))
                 {
@@ -466,12 +472,12 @@ internal sealed class TrayApp : ApplicationContext
     private async Task ApplySuggestionAsync(SuggestionForm preview, TextTarget? destination)
     {
         var source = suggestionSource;
-        if (processing || suggestionForm != preview || source == null || form.Result.Text != source || (destination != null && !settings.Suggestions)) return;
+        if (processing || suggestionForm != preview || source == null || form.ResultText != source || (destination != null && !settings.Suggestions)) return;
         var text = preview.SuggestedText;
         if (string.IsNullOrWhiteSpace(text)) return;
         if (destination == null)
         {
-            CloseSuggestion(); form.Result.Text = text;
+            CloseSuggestion(); form.ResultText = text;
             Status("Suggestion applied", "The last result has been updated. Your original transcript is still available.");
             return;
         }
@@ -484,7 +490,7 @@ internal sealed class TrayApp : ApplicationContext
             if (await destination.ReplaceInsertionAsync(text, ct))
             {
                 ct.ThrowIfCancellationRequested();
-                suggesting = false; CloseSuggestion(); form.Result.Text = text;
+                suggesting = false; CloseSuggestion(); form.ResultText = text;
                 Status("Suggestion applied", "Only the dictated text was replaced. Your original transcript is still available.");
             }
             else if (!preview.IsDisposed)

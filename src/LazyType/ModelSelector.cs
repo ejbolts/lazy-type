@@ -26,7 +26,7 @@ internal sealed class ModelSelector : UserControl
     {
         Height = 78;
         detail.Font = new Font("Segoe UI", 8.5f);
-        var title = new Label { Text = "Text model", Dock = DockStyle.Top, Height = 24, Font = new Font("Segoe UI", 10f, FontStyle.Bold) };
+        var title = new Label { Text = "Clean up / Polish model", Dock = DockStyle.Top, Height = 24, Font = new Font("Segoe UI", 10f, FontStyle.Bold) };
         var choices = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1, Margin = Padding.Empty };
         choices.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
         choices.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));

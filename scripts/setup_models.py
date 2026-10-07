@@ -38,7 +38,7 @@ TEXT_ASSETS = {
         '0a270ec9fe6b34f4a0d33992b6135117b484ebc4766ab76b51d4ae8c457e4c42', None),
 }
 
-def assets_for(choice='qwen35'):
+def assets_for(choice='all'):
     selected = {'qwen35': ['qwen35'], 'gemma': ['gemma'], 'all': ['qwen35', 'gemma']}[choice]
     return ASSETS + [TEXT_ASSETS[name] for name in selected]
 
@@ -76,7 +76,7 @@ def download(asset):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--text-model', choices=['qwen35', 'gemma', 'all'], default='qwen35')
+    parser.add_argument('--text-model', choices=['qwen35', 'gemma', 'all'], default='all')
     parser.add_argument('--list', action='store_true', help='List selected pinned assets without downloading')
     options = parser.parse_args()
     assets = assets_for(options.text_model)

@@ -1,5 +1,5 @@
 param([switch]$SkipModels, [switch]$NoLaunch,
-    [ValidateSet('qwen35', 'gemma', 'all')][string]$TextModel = 'qwen35')
+    [ValidateSet('qwen35', 'gemma', 'all')][string]$TextModel = 'all')
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $installRoot = Join-Path $env:USERPROFILE 'Applications\LazyType'

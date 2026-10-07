@@ -9,8 +9,8 @@ setup = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(setup)
 
 class ModelSetupTests(unittest.TestCase):
-    def test_default_assets_include_only_qwen35(self):
-        self.assertEqual(setup.assets_for(), setup.ASSETS + [setup.TEXT_ASSETS['qwen35']])
+    def test_default_assets_support_cleanup_and_gemma_reword(self):
+        self.assertEqual(setup.assets_for(), setup.ASSETS + [setup.TEXT_ASSETS['qwen35'], setup.TEXT_ASSETS['gemma']])
         self.assertFalse(any('qwen3-4b' in asset[0] for asset in setup.assets_for()))
 
     def test_selection_downloads_only_requested_optional_weights(self):

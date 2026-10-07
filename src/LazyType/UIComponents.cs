@@ -207,6 +207,27 @@ internal static class VectorIcons
         g.SmoothingMode = prevSmoothing;
     }
 
+    // Three rising bars, for usage counts.
+    public static void DrawUsage(Graphics g, Rectangle bounds, Color color)
+    {
+        var prevSmoothing = g.SmoothingMode;
+        g.SmoothingMode = SmoothingMode.AntiAlias;
+
+        using var brush = new SolidBrush(color);
+        int barW = Math.Max(2, (int)(bounds.Width * 0.2f));
+        int gap = Math.Max(1, (int)(bounds.Width * 0.12f));
+        int x = bounds.X + (bounds.Width - (barW * 3 + gap * 2)) / 2;
+        int bottom = bounds.Bottom - (int)(bounds.Height * 0.1f);
+        foreach (var height in new[] { 0.4f, 0.65f, 0.9f })
+        {
+            int h = (int)(bounds.Height * height);
+            DrawingHelpers.FillRoundedRectangle(g, brush, new Rectangle(x, bottom - h, barW, h), Math.Max(1, barW / 2));
+            x += barW + gap;
+        }
+
+        g.SmoothingMode = prevSmoothing;
+    }
+
     public static void DrawPause(Graphics g, Rectangle bounds, Color color)
     {
         var prevSmoothing = g.SmoothingMode;
@@ -382,6 +403,12 @@ internal sealed class ModernCheckBox : CheckBox
         Color checkColor = Color.White;
 
         Color currentBorder = (hovered || Focused) ? borderHover : borderNormal;
+        if (!Enabled)
+        {
+            // Locked but still legible: a softer fill and border instead of the system's disabled grey.
+            bgChecked = isDark ? Color.FromArgb(84, 66, 138) : Color.FromArgb(196, 178, 238);
+            currentBorder = isDark ? Color.FromArgb(52, 61, 78) : Color.FromArgb(226, 230, 237);
+        }
 
         if (Checked)
         {

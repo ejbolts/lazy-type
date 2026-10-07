@@ -60,6 +60,7 @@ internal sealed class MainForm : Form
     public event Action? SuggestionRequested;
     public event Action<string>? RewriteRequested;
     public event Action? PreviewPopupRequested;
+    public event Action? UsageRequested;
     public bool Quitting;
 
     public MainForm()
@@ -290,6 +291,7 @@ internal sealed class MainForm : Form
         // Assemble root layout
         root.Controls.Add(resultCard);
         Models.Dock = DockStyle.Top;
+        Models.UsageRequested += () => UsageRequested?.Invoke();
         root.Controls.Add(Models);
         root.Controls.Add(settingsContainer);
         root.Controls.Add(shortcutCard);
@@ -482,6 +484,7 @@ internal sealed class MainForm : Form
 
 
 
+        settingsMenu.Items.Add("Model usage…", null, (_, _) => UsageRequested?.Invoke());
         settingsMenu.Items.Add("Preview suggestion popup", null, (_, _) => PreviewPopupRequested?.Invoke());
         settingsMenu.Items.Add("Test with WAV audio…", null, (_, _) => ImportRequested?.Invoke());
 

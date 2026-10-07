@@ -51,6 +51,22 @@ internal static class Program
             Check(form.ResultText == "First paragraph.\n\nSecond paragraph.", "App text stays consistent for preview comparisons");
             passed++; Console.WriteLine("PASS Native reword toggle and empty/busy/manual action states");
         }
+        using (var form = new Form { ForeColor = Color.FromArgb(240, 242, 248) })
+        {
+            var selector = new ModelSelector(); form.Controls.Add(selector); selector.ApplyTheme(true);
+            selector.SelectedModel = TextModels.Qwen35;
+            var labels = selector.Controls.Cast<Control>().SelectMany(Descendants).OfType<Label>().Where(l => TextModels.Choices.Any(l.Text.StartsWith)).ToArray();
+            var boxes = selector.Controls.Cast<Control>().SelectMany(Descendants).OfType<CheckBox>().ToArray();
+            selector.Locked = true;
+            Check(selector.Enabled && labels.Length == 2 && labels.All(l => l.Enabled && l.ForeColor == Color.FromArgb(150, 165, 185)), "Locked labels stay enabled and readable");
+            Check(boxes.All(b => !b.Enabled), "Locked checkboxes are disabled");
+            labels.Single(l => l.Text == TextModels.Gemma).GetType().GetMethod("OnClick", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+                .Invoke(labels.Single(l => l.Text == TextModels.Gemma), new object[] { EventArgs.Empty });
+            Check(selector.SelectedModel == TextModels.Qwen35, "Locked label click cannot change the model");
+            selector.Locked = false;
+            Check(labels.All(l => l.ForeColor == form.ForeColor) && boxes.All(b => b.Enabled), "Unlocked labels inherit the theme colour");
+            passed++; Console.WriteLine("PASS Locked model choice stays readable");
+        }
         SynchronizationContext.SetSynchronizationContext(null);
         if (args.Contains("--benchmark")) return await RewordBenchmark.Run(args);
         if (args.Contains("--validate-benchmark")) return RewordBenchmark.Validate(args[Array.IndexOf(args, "--validate-benchmark") + 1]);
@@ -185,6 +201,38 @@ internal static class Program
         });
         await Test("Repeated stop/dispose and restart leak no fake workers", async () =>
         { using var r = new Rig(); for (var i = 0; i < 20; i++) { await r.Host.EnsureReadyAsync(default); r.Host.Stop(); r.Host.Stop(); Check(r.Host.WorkerCount == 0); } r.Host.Dispose(); r.Host.Dispose(); await Throws(() => r.Host.EnsureReadyAsync(default)); Check(r.Workers.All(w => w.Disposed)); });
+        await Test("Model usage counts each cleanup per model, mode and words; survives save format", () =>
+        {
+            var usage = new ModelUsage();
+            Check(usage.Dictations == 0 && usage.For(TextModels.Gemma).Dictations == 0);
+            usage.Record(ModelUsage.LegacyQwenModel, true, "Um, send the report at 3:30, okay?");
+            usage.Record(TextModels.Gemma, true, "It's state-of-the-art work.");
+            usage.Record(ModelUsage.LegacyQwenModel, false, "");
+            Check(usage.For(ModelUsage.LegacyQwenModel) is { Dynamic: 1, Manual: 1, Dictations: 2, Words: 7 }, "Qwen counts");
+            Check(usage.For(TextModels.Gemma) is { Dynamic: 1, Manual: 0, Words: 3 } && usage.Dictations == 3 && usage.Words == 10, "Gemma counts");
+            var json = JsonSerializer.Serialize(usage);
+            Check(!json.Contains("Dictations") && !json.Contains("report"), "Only counts are stored");
+            var loaded = JsonSerializer.Deserialize<ModelUsage>(json)!;
+            Check(loaded.Dictations == 3 && loaded.Since == usage.Since && loaded.For(TextModels.Gemma).Words == 3, "Round-trip");
+            return Task.CompletedTask;
+        });
+        await Test("Model usage persists across restarts and keeps an unreadable file", () =>
+        {
+            var folder = Path.Combine(Path.GetTempPath(), "lazytype-usage-" + Guid.NewGuid().ToString("N"));
+            try
+            {
+                var file = Path.Combine(folder, "usage.json");
+                Check(ModelUsage.Load(file).Dictations == 0, "Missing file starts empty");
+                var first = ModelUsage.Load(file); first.Record(TextModels.Gemma, true, "one two three"); first.Save(file);
+                var second = ModelUsage.Load(file); second.Record(ModelUsage.LegacyQwenModel, false, "four"); second.Save(file);
+                var third = ModelUsage.Load(file);
+                Check(third.Dictations == 2 && third.Words == 4 && third.Since == first.Since && !File.Exists(file + ".tmp"), "Counts accumulate across loads");
+                File.WriteAllText(file, "{ not json");
+                Check(ModelUsage.Load(file).Dictations == 0 && File.Exists(file + ".unreadable") && !File.Exists(file), "Corrupt file is set aside");
+            }
+            finally { if (Directory.Exists(folder)) Directory.Delete(folder, true); }
+            return Task.CompletedTask;
+        });
         await Test("Dash cleanup preserves paragraphs, flags, hyphens and ranges", () =>
         {
             foreach (var text in new[] { "First.\n\nNext.", "Run --dry-run and --output=file.", "Use state-of-the-art tools.", "The range is 3–5 and 3-5.", "The value is -5." }) Check(EngineHost.CleanPauseDashes(text) == text, text);
@@ -206,8 +254,10 @@ internal static class Program
                 if (audioIndex >= 0) { var transcript = await host.TranscribeAsync(File.ReadAllBytes(args[audioIndex + 1]), default); Check(transcript.Contains("country", StringComparison.OrdinalIgnoreCase), "Public audio transcription"); }
                 foreach (var source in new[] { "Um, please send the report at 3:30 on 2026-10-05.", "Run --dry-run.\n\nKeep the output in report.txt." })
                 {
-                    var cleaned = await host.CleanupAsync(source, default); Check(EngineHost.PreservesNumbers(source, cleaned));
-                    var reworded = await host.RewordAsync(source, default); Check(EngineHost.PreservesRewordNumbers(source, reworded));
+                    var (cleaned, editor) = await host.RewriteWithModelAsync(source, TextEditModes.Cleanup, default);
+                    Check(editor == model && EngineHost.PreservesNumbers(source, cleaned), "Cleanup reports its actual model and preserves numbers");
+                    var (reworded, rewordEditor) = await host.RewriteWithModelAsync(source, TextEditModes.Reword, default);
+                    Check(rewordEditor == model && EngineHost.PreservesRewordNumbers(source, reworded), "Reword reports its actual worker and preserves numbers");
                     var polished = await host.SuggestAsync(source, default); Check(EngineHost.PreservesNumbers(source, polished));
                     if (source.Contains("--dry-run")) Check(cleaned.Contains("--dry-run") && polished.Contains("--dry-run") && cleaned.Contains('\n') && polished.Contains('\n'), "Flags/paragraphs preserved end to end");
                 }

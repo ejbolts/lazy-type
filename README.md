@@ -49,6 +49,12 @@ python scripts/setup_models.py --text-model all
 
 The setup and installer default to both models so Reword is ready alongside Qwen3.5 cleanup. Use `--text-model gemma` to install only Gemma or `--text-model qwen35` for only Qwen3.5 (Reword then needs Gemma installed separately), or pass `-TextModel all` to `scripts/install.ps1`. Pinned Q4_K_M files are approximately 5.68 GB for Qwen3.5 and 7.12 GB for Gemma. Existing benchmark downloads under `benchmarks/*/models` are reused without copying them. Selecting a model does not download it; a missing model is reported when used. Previously downloaded models remain on disk. Both models run with thinking disabled for bounded editing responses.
 
+## Model usage
+
+Click **Usage** beside **Clean up / Polish model** in the main window (or choose **Model usage** from the gear or tray menu) to see how often each text model edited a dictation. Each successful cleanup or speech Reword counts once, for the worker that actually edited it. Reword counts towards Gemma even when Qwen is selected for cleanup. Each model shows its share of all dictations, spoken words and average words per dictation. Historical Qwen3 4B and Dynamic counts remain visible and saved; those models/modes are no longer selectable. New counts appear as direct edits.
+
+Raw dictations, failed edits, manual Last result edits and wording checks are not counted. Counts update live while the window is open. Counts are saved after every dictation in `usage.json` (in the app folder above), so they carry over when the app restarts or updates. Only counts are saved; your words are never stored. An unreadable file is kept as `usage.json.unreadable` rather than overwritten. Isolated test sessions keep their counts in memory only.
+
 ## AI suggestions
 
 Turn on **AI suggestions · check wording after dictation** in the main window. It is off by default and saved separately from speech cleanup.
@@ -82,7 +88,7 @@ The marks and bar never take focus, so you can keep typing. Labels sit on whiche
 - Silero VAD filters silence before transcription.
 - Native CUDA engines use the NVIDIA GPU. Each text worker has a 4,096-token context and a single processing slot to bound memory use.
 - No cloud transcription or cleanup; the only inference connections are loopback connections on this PC. The text server uses a per-session authentication key.
-- Recordings are processed in memory. The last original and edited transcript are kept in the app until exit. There is no persistent transcript history.
+- Recordings are processed in memory. The last original and edited transcript are kept in the app until exit. There is no persistent transcript history; model usage stores counts only.
 - Operational logs exclude dictated content. Model files, runtime archives, settings and logs are stored in `%USERPROFILE%\Applications\LazyType`.
 - Model workers are attached to a Windows job so closing/crashing the app also terminates its workers. The app never runs as administrator.
 

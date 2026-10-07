@@ -19,6 +19,8 @@ internal sealed class TrayApp : ApplicationContext
     private TextTarget? pendingSuggestion;
     private readonly EngineHost engines = new();
     private readonly AppSettings settings;
+    private readonly ModelUsage usage;
+    private UsageForm? usageForm;
     private readonly bool testSession;
     private readonly ThemeController themes;
     private readonly NotifyIcon tray = new();
@@ -36,6 +38,7 @@ internal sealed class TrayApp : ApplicationContext
     {
         this.testSession = testSession;
         settings = testSession ? new AppSettings { Hotkey = "F8" } : AppSettings.Load();
+        usage = testSession ? new ModelUsage() : ModelUsage.Load();
         if (testAudioPath != null)
         {
             using var test = new WaveFileReader(testAudioPath);
@@ -90,11 +93,13 @@ internal sealed class TrayApp : ApplicationContext
             else _ = ToggleAsync(id == 2);
         };
         form.PauseRequested += TogglePause; form.QuitRequested += Quit; form.ImportRequested += () => _ = ImportAsync();
+        form.UsageRequested += ShowUsage;
         overlay.AudioLevel = () => mic?.Level ?? 0;
         overlay.Owner = form;
         tray.Icon = Native.MakeIcon(Color.FromArgb(65, 98, 211)); tray.Text = "Lazy Type · Local dictation";
         var menu = new ContextMenuStrip();
         menu.Items.Add("Open Lazy Type", null, (_, _) => form.ShowWindow());
+        menu.Items.Add("Model usage", null, (_, _) => { form.ShowWindow(); ShowUsage(); });
         menu.Items.Add("Pause / resume dictation", null, (_, _) => TogglePause());
         menu.Items.Add("Quit and free memory", null, (_, _) => Quit());
         tray.ContextMenuStrip = menu; tray.DoubleClick += (_, _) => form.ShowWindow(); tray.Visible = true;
@@ -105,10 +110,29 @@ internal sealed class TrayApp : ApplicationContext
     }
 
     private void SaveSettings() { if (!testSession) settings.Save(); }
+
+    // New edits use a selected model or the fixed Gemma Reword override. Historical Dynamic counts remain saved.
+    private void RecordUsage(string model, string transcript)
+    {
+        usage.Record(model, false, transcript);
+        if (!testSession) usage.Save();
+        usageForm?.ShowStats(usage);
+    }
+
+    private void ShowUsage()
+    {
+        if (closing) return;
+        if (usageForm != null) { usageForm.ShowStats(usage); usageForm.Activate(); return; }
+        var dialog = new UsageForm(ThemeController.Resolve(settings.Theme, ThemeController.IsSystemDark));
+        dialog.FormClosed += (_, _) => { if (usageForm == dialog) usageForm = null; dialog.Dispose(); };
+        dialog.ShowStats(usage);
+        usageForm = dialog;
+        dialog.ShowOver(form);
+    }
     private void SetBusy(bool busy)
     {
         form.SetSuggestionBusy(busy);
-        form.Models.Enabled = !recording && !processing;
+        form.Models.Locked = recording || processing;
     }
     private void UI(Action action) { if (!closing && !form.IsDisposed) try { if (form.InvokeRequired) form.BeginInvoke(action); else action(); } catch { } }
     private void Status(string title, string explanation)
@@ -242,7 +266,11 @@ internal sealed class TrayApp : ApplicationContext
         {
             overlay.Present(settings.EditMode == TextEditModes.Reword ? "Rewording…" : "Cleaning up…");
             Status(settings.EditMode == TextEditModes.Reword ? "Rewording your speech" : "Cleaning up your wording", "Microphone off · Editing locally");
-            try { result = await engines.RewriteAsync(transcript, settings.EditMode, ct); }
+            try
+            {
+                (result, var model) = await engines.RewriteWithModelAsync(transcript, settings.EditMode, ct);
+                RecordUsage(model, transcript);
+            }
             catch (Exception) when (!ct.IsCancellationRequested)
             {
                 fallback = true;
@@ -559,7 +587,7 @@ internal sealed class TrayApp : ApplicationContext
     {
         if (closing) return;
         closing = true; shutdown.Cancel(); operation?.Cancel(); lifetime.Cancel();
-        suggesting = false; suggestionForm?.Close(); highlight.Dispose();
+        suggesting = false; suggestionForm?.Close(); usageForm?.Close(); highlight.Dispose();
         mic?.Dispose(); themes.Dispose(); overlay.Dispose(); engines.Dispose();
         for (var id = 1; id <= 4; id++) Native.UnregisterHotKey(form.Handle, id);
         tray.Visible = false; tray.Icon?.Dispose(); tray.Dispose(); form.Quitting = true; form.Close(); form.Dispose();

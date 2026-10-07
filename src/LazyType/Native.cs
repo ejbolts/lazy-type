@@ -244,17 +244,23 @@ internal sealed class TextTarget
     }
     public async Task<bool> ReplaceInsertionAsync(string text, CancellationToken ct)
     {
-        if (!CanReplaceInsertion()) return false;
+        if (!CanReplaceInsertion()) { AppLog.Write("Replacement refused: the field changed since dictation or is unavailable."); return false; }
         for (var i = 0; i < 40 && Native.ModifiersDown; i++) await Task.Delay(25, ct);
         ct.ThrowIfCancellationRequested();
+        var step = "bringing the editor forward";
         try
         {
             if (Native.ModifiersDown || !Native.SetForegroundWindow(Window)) { AppLog.Write("Replacement refused: the field's window could not be brought forward."); return false; }
-            element!.SetFocus();
+            step = "focusing the field";
+            // Passive suggestion windows leave the editor focused. Notion exposes its focused block
+            // as non-focusable, so requesting focus again throws even though it is current.
+            if (!IsCurrent()) element!.SetFocus();
             if (!IsCurrent() || !CanReplaceInsertion()) { AppLog.Write("Replacement refused: the field lost focus or changed."); return false; }
+            step = "finding the dictated range";
             var pattern = TextPattern()!;
             var range = pattern.DocumentRange.FindText(insertedText!, false, false);
             if (range == null || range.GetText(-1) != insertedText) { AppLog.Write("Replacement refused: the dictation could not be found in the field."); return false; }
+            step = "selecting the dictated range";
             range.Select();
             bool SelectionUnchanged()
             {
@@ -268,12 +274,13 @@ internal sealed class TextTarget
                 }
                 catch { return false; }
             }
+            step = "pasting the replacement";
             var inserted = await InsertAsync(text, ct, SelectionUnchanged);
             if (!inserted) AppLog.Write("Replacement refused: the selection did not match the dictation or the field lost focus.");
             return inserted;
         }
         catch (OperationCanceledException) { throw; }
-        catch (Exception e) { AppLog.Write("Replacement failed: " + e.GetType().Name); return false; }
+        catch (Exception e) { AppLog.Write($"Replacement failed while {step}: {e.GetType().Name}."); return false; }
     }
     public async Task<bool> InsertAsync(string text, CancellationToken ct, Func<bool>? validateSelection = null)
     {

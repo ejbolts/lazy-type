@@ -67,6 +67,21 @@ internal static class Program
             Check(labels.All(l => l.ForeColor == form.ForeColor) && boxes.All(b => b.Enabled), "Unlocked labels inherit the theme colour");
             passed++; Console.WriteLine("PASS Locked model choice stays readable");
         }
+        using (var preview = new SuggestionForm("Graph icon", true, true))
+        {
+            preview.ShowSuggestion("The graph icon", TextDiff.Compare("Graph icon", "The graph icon"), true, inline: true);
+            preview.SetApplying();
+            preview.ShowApplyFailure("Couldn't replace the text. Copy the suggestion to use it.");
+            Check(preview.SuggestedText == "The graph icon", "Failed replacement retains the copyable suggestion");
+            var controls = preview.Controls.Cast<Control>().SelectMany(Descendants).ToArray();
+            Check(controls.OfType<Label>().Any(l => l.Text == "Couldn't apply suggestion"), "Failure is shown in the popup");
+            Check(controls.OfType<RichTextBox>().Single().Text.Contains("Copy the suggestion"), "Popup explains the recovery action");
+            Check(controls.OfType<Button>().Any(b => b.Text == "Apply suggestion" && !b.Enabled), "Failed apply clears the busy caption and disables retries");
+            Check(controls.OfType<Button>().Any(b => b.Text == "Copy" && b.Enabled), "Copy stays available");
+            preview.ShowFailure("Suggestion unavailable. Close and try again.");
+            Check(controls.OfType<Label>().Any(l => l.Text == "Suggestion unavailable"), "Generation errors have the correct caption");
+            passed++; Console.WriteLine("PASS Replacement failure appears in popup and retains Copy");
+        }
         SynchronizationContext.SetSynchronizationContext(null);
         if (args.Contains("--benchmark")) return await RewordBenchmark.Run(args);
         if (args.Contains("--validate-benchmark")) return RewordBenchmark.Validate(args[Array.IndexOf(args, "--validate-benchmark") + 1]);

@@ -370,6 +370,7 @@ internal sealed class TrayApp : ApplicationContext
         }
         PositionPreview();
         preview.Shown += (_, _) => PositionPreview();
+        preview.SizeChanged += (_, _) => PositionPreview();
         preview.FormClosed += (_, _) =>
         {
             if (suggestionForm != preview) return;
@@ -458,7 +459,7 @@ internal sealed class TrayApp : ApplicationContext
             || index < 0 || index >= marks.Count || form.ResultText != source || !settings.Suggestions) { highlight.Release(); return; }
         var text = TextDiff.ApplyOne(parts, marks[index]);
         var suggested = preview.SuggestedText;
-        processing = true; suggesting = true; SetBusy(true);
+        processing = true; suggesting = true; SetBusy(true); preview.SetApplying();
         var id = ++generation;
         using var currentOperation = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);
         operation = currentOperation; var ct = currentOperation.Token;
@@ -484,12 +485,18 @@ internal sealed class TrayApp : ApplicationContext
             }
             else if (!preview.IsDisposed)
             {
-                highlight.Release();
+                highlight.Dismiss();
+                preview.ShowApplyFailure("Couldn't apply that change. The field changed or replacement was blocked. Copy the suggestion to use it.");
                 Status("Couldn't apply that change", "The field changed or replacement was blocked. Your text is unchanged.");
             }
         }
         catch (OperationCanceledException) { }
-        catch (Exception) { highlight.Release(); }
+        catch (Exception)
+        {
+            highlight.Dismiss();
+            if (!preview.IsDisposed) preview.ShowApplyFailure("Couldn't replace the text. Copy the suggestion to use it.");
+            Status("Couldn't apply that change", "Replacement was blocked. Copy the suggestion to use it.");
+        }
         finally
         {
             if (operation == currentOperation) operation = null;
@@ -523,12 +530,18 @@ internal sealed class TrayApp : ApplicationContext
             }
             else if (!preview.IsDisposed)
             {
-                preview.ShowFailure("The field changed or replacement was blocked. Copy the suggestion to use it.");
-                preview.Activate();
+                highlight.Dismiss();
+                preview.ShowApplyFailure("The field changed or replacement was blocked. Copy the suggestion to use it.");
+                Status("Couldn't apply the suggestion", "Replacement was blocked. Copy the suggestion to use it.");
             }
         }
         catch (OperationCanceledException) { }
-        catch (Exception) { if (!preview.IsDisposed) preview.ShowFailure("Couldn't replace the text. Copy the suggestion to use it."); }
+        catch (Exception)
+        {
+            highlight.Dismiss();
+            if (!preview.IsDisposed) preview.ShowApplyFailure("Couldn't replace the text. Copy the suggestion to use it.");
+            Status("Couldn't apply the suggestion", "Replacement was blocked. Copy the suggestion to use it.");
+        }
         finally
         {
             if (operation == currentOperation) operation = null;

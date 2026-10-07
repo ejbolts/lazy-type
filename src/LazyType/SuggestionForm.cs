@@ -25,12 +25,27 @@ internal sealed class SuggestionForm : Form
     // Shown without taking focus, for suggestions that appear on their own while the user may be typing.
     public bool Passive { get; set; }
     protected override bool ShowWithoutActivation => Passive;
+    protected override CreateParams CreateParams
+    {
+        get
+        {
+            var cp = base.CreateParams;
+            if (Passive) cp.ExStyle |= 0x08000000; // WS_EX_NOACTIVATE: clicks keep the editor focused.
+            return cp;
+        }
+    }
+    protected override void WndProc(ref Message m)
+    {
+        if (Passive && m.Msg == 0x21) { m.Result = (IntPtr)3; return; } // WM_MOUSEACTIVATE: MA_NOACTIVATE
+        base.WndProc(ref m);
+    }
     public string SuggestedText => suggestedText;
 
     public SuggestionForm(string original, bool external, bool isDark = false, string? editMode = null)
     {
         applyLabel = editMode == null ? "Apply suggestion" : "Apply " + editMode.ToLowerInvariant();
         this.isDark = isDark;
+        Text = "Lazy Type · Wording suggestion";
         FormBorderStyle = FormBorderStyle.None;
         ShowInTaskbar = false;
         StartPosition = FormStartPosition.Manual;
@@ -225,10 +240,17 @@ internal sealed class SuggestionForm : Form
     {
         changes = null;
         compact = false; details.Visible = false;
-        subtitle.Text = "Suggested wording";
+        subtitle.Text = "Suggestion unavailable";
         suggestion.Text = message;
         apply.Enabled = false;
+        apply.Text = "Apply suggestion";
         UpdateLayout();
+    }
+
+    public void ShowApplyFailure(string message)
+    {
+        ShowFailure(message);
+        subtitle.Text = "Couldn't apply suggestion";
     }
 
     private void UpdateLayout()

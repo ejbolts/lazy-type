@@ -27,6 +27,8 @@ internal sealed class TrayApp : ApplicationContext
     private readonly CancellationTokenSource shutdown = new();
     private CancellationTokenSource lifetime = new();
     private CancellationTokenSource? operation;
+    // Models stay loaded briefly after use so a follow-up dictation or check starts without reloading.
+    private readonly System.Windows.Forms.Timer idleRelease = new() { Interval = 30_000 };
     private Microphone? mic;
     private TextTarget? target;
     private bool recording, processing, paused, closing, rawMode, suggesting;
@@ -103,6 +105,7 @@ internal sealed class TrayApp : ApplicationContext
         menu.Items.Add("Pause / resume dictation", null, (_, _) => TogglePause());
         menu.Items.Add("Quit and free memory", null, (_, _) => Quit());
         tray.ContextMenuStrip = menu; tray.DoubleClick += (_, _) => form.ShowWindow(); tray.Visible = true;
+        idleRelease.Tick += (_, _) => { idleRelease.Stop(); if (!recording && !processing && !closing) ReleaseModels(); };
         RegisterHotkeys();
         Status("Ready · models unloaded", "Microphone off · Models load only when you start dictating");
         if (show) form.ShowWindow();
@@ -180,10 +183,14 @@ internal sealed class TrayApp : ApplicationContext
 
     private void ReleaseModels()
     {
+        idleRelease.Stop();
         var previous = lifetime;
         previous.Cancel(); engines.Stop();
         lifetime = new(); previous.Dispose();
     }
+
+    // Restarts the idle countdown; a recording or edit that is running when it ends restarts it on completion.
+    private void ReleaseModelsLater() { idleRelease.Stop(); idleRelease.Start(); }
 
     private void SelectTextModel(string? editMode) => engines.SetTextModel(TextModels.ForEdit(settings.TextModel, editMode));
 
@@ -230,7 +237,7 @@ internal sealed class TrayApp : ApplicationContext
             var wav = testAudio ?? await currentMic!.StopAsync();
             var speech = testAudio != null || currentMic!.HasSpeech; currentMic?.Dispose(); if (mic == currentMic) mic = null;
             ct.ThrowIfCancellationRequested();
-            if (!speech) { Status("No speech detected · models unloaded", "Microphone off · Try speaking closer or select another microphone."); return; }
+            if (!speech) { Status("No speech detected", "Microphone off · Try speaking closer or select another microphone."); return; }
             await ProcessAudioAsync(wav, raw, destination, ct);
         }
         catch (OperationCanceledException) { }
@@ -243,9 +250,9 @@ internal sealed class TrayApp : ApplicationContext
             {
                 var next = pendingSuggestion; pendingSuggestion = null;
                 processing = false; overlay.Dismiss(); EscapeEnabled(false);
-                // Keep the text model loaded and check the wording straight away; it is released afterwards.
+                // Keep the text model loaded and check the wording straight away; it is released after the idle delay.
                 if (next != null && !ct.IsCancellationRequested && !closing && !paused) _ = SuggestAsync(next, automatic: true);
-                else { ReleaseModels(); SetBusy(paused); }
+                else { ReleaseModelsLater(); SetBusy(paused); }
             }
         }
     }
@@ -260,7 +267,7 @@ internal sealed class TrayApp : ApplicationContext
         var timer = Stopwatch.StartNew();
         var transcript = await engines.TranscribeAsync(wav, ct);
         ct.ThrowIfCancellationRequested(); form.Original.Text = transcript.ReplaceLineEndings("\r\n");
-        if (string.IsNullOrWhiteSpace(transcript)) { Status("No speech detected · models unloaded", "Microphone off · Nothing inserted."); return; }
+        if (string.IsNullOrWhiteSpace(transcript)) { Status("No speech detected", "Microphone off · Nothing inserted."); return; }
         var result = transcript; var fallback = false;
         if (!raw)
         {
@@ -280,10 +287,6 @@ internal sealed class TrayApp : ApplicationContext
         }
         ct.ThrowIfCancellationRequested(); form.ResultText = result;
         if (!testSession) Native.SetClipboardText(result);
-        // Inference is finished; release GPU allocations before clipboard insertion, unless the text model is
-        // about to check the wording of this dictation.
-        var autoCheck = settings.Suggestions && destination != null && result.Length <= 6000;
-        if (!autoCheck) engines.Stop();
         overlay.Dismiss();
         var inserted = destination != null && await destination.InsertAsync(result, ct);
         ct.ThrowIfCancellationRequested();
@@ -297,14 +300,14 @@ internal sealed class TrayApp : ApplicationContext
         if (!inserted && destination != null)
         {
             tray.ShowBalloonTip(4000, "Your text is ready", "Focus changed or insertion was blocked. Your text is copied to your clipboard and ready to paste.", ToolTipIcon.Info);
-            Status("Text copied to clipboard · models unloaded", "The original field is no longer focused. Your result is copied to your clipboard.");
+            Status("Text copied to clipboard", "The original field is no longer focused. Your result is copied to your clipboard.");
         }
         else if (destination == null)
         {
-            Status(testSession ? "Test result ready · models unloaded" : "Text copied to clipboard · models unloaded",
+            Status(testSession ? "Test result ready" : "Text copied to clipboard",
                 testSession ? "Sample audio processed · Microphone off · Your result is shown below." : "Your result was copied to the clipboard and is ready to paste.");
         }
-        else Status("Ready · models unloaded", fallback ? "Cleanup was unavailable. Your original text was kept." : $"Microphone off · Last dictation processed in {seconds:F1}s · All processing stayed on this PC");
+        else Status("Ready", fallback ? "Cleanup was unavailable. Your original text was kept." : $"Microphone off · Last dictation processed in {seconds:F1}s · All processing stayed on this PC");
     }
 
     private async Task ImportAsync()
@@ -333,7 +336,7 @@ internal sealed class TrayApp : ApplicationContext
         finally
         {
             if (operation == currentOperation) operation = null;
-            if (id == generation) { ReleaseModels(); processing = false; SetBusy(paused); overlay.Dismiss(); EscapeEnabled(false); }
+            if (id == generation) { ReleaseModelsLater(); processing = false; SetBusy(paused); overlay.Dismiss(); EscapeEnabled(false); }
         }
     }
 
@@ -400,14 +403,14 @@ internal sealed class TrayApp : ApplicationContext
                 if (automatic && !TextDiff.HasChanges(TextDiff.Compare(source, text)))
                 {
                     suggesting = false; CloseSuggestion();
-                    Status("Ready · models unloaded", "Microphone off · Your wording already reads clearly, so nothing was marked.");
+                    Status("Ready", "Microphone off · Your wording already reads clearly, so nothing was marked.");
                     return;
                 }
                 ShowSuggestion(preview, destination, source, text);
                 PositionPreview();
                 if (!preview.Visible) preview.Show();
             }
-            Status("Suggestion ready · models unloaded", "Review the suggestion before applying. Your original transcript is still available.");
+            Status("Suggestion ready", "Review the suggestion before applying. Your original transcript is still available.");
         }
         catch (OperationCanceledException) { }
         catch (Exception e)
@@ -415,7 +418,7 @@ internal sealed class TrayApp : ApplicationContext
             if (!ct.IsCancellationRequested && suggestionForm == preview && automatic)
             {
                 suggesting = false; CloseSuggestion();
-                Status("Suggestion unavailable · models unloaded", e.Message);
+                Status("Suggestion unavailable", e.Message);
                 AppLog.Write("Automatic suggestion failed: " + e.GetType().Name);
             }
             else if (!ct.IsCancellationRequested && suggestionForm == preview)
@@ -424,14 +427,14 @@ internal sealed class TrayApp : ApplicationContext
                     : editMode == TextEditModes.Reword && (e is FileNotFoundException or DirectoryNotFoundException) ? "Gemma 4 is required for Reword. Install its model files and try again. Your text is unchanged."
                     : (editMode ?? "Suggestion") + " unavailable. Your text is unchanged. Close and try again.");
                 highlight.Dismiss();
-                Status("Suggestion unavailable · models unloaded", e.Message);
+                Status("Suggestion unavailable", e.Message);
                 AppLog.Write("Suggestion failed: " + e.GetType().Name);
             }
         }
         finally
         {
             if (operation == currentOperation) operation = null;
-            if (id == generation) { ReleaseModels(); processing = false; suggesting = false; SetBusy(paused); EscapeEnabled(false); }
+            if (id == generation) { ReleaseModelsLater(); processing = false; suggesting = false; SetBusy(paused); EscapeEnabled(false); }
         }
     }
 
@@ -601,7 +604,7 @@ internal sealed class TrayApp : ApplicationContext
         if (closing) return;
         closing = true; shutdown.Cancel(); operation?.Cancel(); lifetime.Cancel();
         suggesting = false; suggestionForm?.Close(); usageForm?.Close(); highlight.Dispose();
-        mic?.Dispose(); themes.Dispose(); overlay.Dispose(); engines.Dispose();
+        mic?.Dispose(); themes.Dispose(); overlay.Dispose(); idleRelease.Dispose(); engines.Dispose();
         for (var id = 1; id <= 4; id++) Native.UnregisterHotKey(form.Handle, id);
         tray.Visible = false; tray.Icon?.Dispose(); tray.Dispose(); form.Quitting = true; form.Close(); form.Dispose();
         AppLog.Write("Exited; microphone closed and models released."); ExitThread();

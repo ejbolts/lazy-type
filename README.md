@@ -1,6 +1,6 @@
 # Lazy Type
 
-Local dictation for Windows with NVIDIA GPUs. Whisper Turbo transcribes your speech, your selected local model cleans up grammar and punctuation, and text is inserted into the active application. Processing stays entirely on your PC. Model workers load when needed and release memory when finished.
+Local dictation for Windows with NVIDIA GPUs. Whisper Turbo transcribes your speech, your selected local model cleans up grammar and punctuation, and text is inserted into the active application. Processing stays entirely on your PC. Model workers load when needed and release memory 30 seconds after they were last used.
 
 ## Use
 
@@ -8,7 +8,7 @@ Local dictation for Windows with NVIDIA GPUs. Whisper Turbo transcribes your spe
 2. The speech and language models load on demand the first time you speak, using your NVIDIA GPU.
 3. When you finish speaking, press the hotkey again (or wait for the two-minute limit).
 4. A compact, rounded, translucent indicator follows your mouse pointer and shows recording and microphone level, followed by transcription and cleanup. It stays within the screen's working area and does not take focus. The microphone closes before model processing starts.
-5. After transcription and cleanup, your text is copied to the clipboard and pasted into the original field if it is still focused. The models then unload automatically (after the wording check, when AI suggestions are on); model files remain on disk for the next recording.
+5. After transcription and cleanup, your text is copied to the clipboard and pasted into the original field if it is still focused. The models stay loaded for 30 seconds so a follow-up recording starts immediately, then unload automatically (the countdown starts after the wording check, when AI suggestions are on, and restarts after each use); model files remain on disk for the next recording.
 6. With **AI suggestions** on, the wording is checked straight after pasting and any suggested changes are marked in the field (see [AI suggestions](#ai-suggestions)).
 
 **Ctrl+Alt+Shift+Space** toggles recording without grammar cleanup. **Escape** cancels an active recording or processing operation and unloads the models. **Ctrl+Alt+Shift+P** pauses/resumes dictation. Pause and Quit release any model workers and their GPU allocations. Resume only arms dictation; models load on the next recording. The dictation hotkey also resumes automatically when paused.
@@ -39,7 +39,7 @@ The benchmark uses the production prompts, model settings, parser and validation
 
 ## Text model selection
 
-Choose **Qwen3.5 9B** or **Gemma 4 12B** in **Clean up / Polish model**. Qwen3.5 is the default for these edits. Reword always uses Gemma 4, including the manual Reword button. The selection is saved; older Qwen3 4B, Dynamic, and unknown selections migrate to Qwen3.5. Only the model required for the current edit loads; a later Polish check restores the selected model, releasing Gemma before loading another model. Choices are locked while recording or editing; change them when idle or paused. Escape, Pause, Quit, and normal completion release the worker.
+Choose **Qwen3.5 9B** or **Gemma 4 12B** in **Clean up / Polish model**. Qwen3.5 is the default for these edits. Reword always uses Gemma 4, including the manual Reword button. The selection is saved; older Qwen3 4B, Dynamic, and unknown selections migrate to Qwen3.5. Only the model required for the current edit loads; a later Polish check restores the selected model, releasing Gemma before loading another model. Choices are locked while recording or editing; change them when idle or paused. Escape, Pause and Quit release the worker immediately; normal completion releases it after 30 seconds idle.
 
 Install both choices with:
 
@@ -79,7 +79,7 @@ The marks and bar never take focus, so you can keep typing. Labels sit on whiche
 - Only the dictated range is replaced; surrounding text is preserved. Nothing is replaced until you click a label or **Apply suggestion**.
 - Suggestion labels and the automatic pop-up keep the editor focused when clicked, including Notion blocks that Windows reports as focused but not focusable. If replacement fails, the pop-up explains the failure, clears the marks, and keeps **Copy** available.
 - Marks follow scrolling and window moves, are hidden wherever another window covers the field, and clear once the field is edited or the bar is closed. If an editor cannot locate every change, the pop-up shows the comparison instead.
-- After a dictation, the text model stays loaded from cleanup for the check and is released straight afterward; from the **Last result** wand it loads only when clicked. The microphone is never opened. Escape, closing the bar, disabling suggestions, pausing or quitting cancels a check and releases the model.
+- After a dictation, the text model stays loaded from cleanup for the check and is released 30 seconds afterward; from the **Last result** wand it loads only when clicked. The microphone is never opened. Escape, closing the bar, disabling suggestions, pausing or quitting cancels a check and releases the model.
 - Suggestions support results up to 6,000 characters. Failed or incomplete edits leave your text unchanged.
 
 ## Models and privacy
